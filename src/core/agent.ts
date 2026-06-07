@@ -11,6 +11,8 @@ export interface AgentDeps {
   tools: ToolRegistry;
   config: PersojeConfig;
   cwd: string;
+  /** Pre-built repo-map appended to the system prompt (empty = none). */
+  repoMap?: string;
   /**
    * Approval hook for mutating tools (bash/write/edit). Return false to deny.
    * Absent hook = auto-approve (plain REPL / one-shot mode).
@@ -35,7 +37,34 @@ export class Agent {
     this.context = new ContextManager(
       deps.config.context.budgetTokens,
       deps.config.context.compactionThreshold,
+      deps.config.context.keepFullTurns,
     );
+  }
+
+  /** Compact the conversation via the compactor model (free-model grunt work). */
+  async compact(): Promise<{ before: number; after: number } | null> {
+    const { client, config } = this.deps;
+    return this.context.compact(async (transcript) => {
+      let summary = "";
+      const stream = client.stream({
+        model: config.model.compactor || config.model.primary,
+        messages: [
+          {
+            role: "user",
+            content:
+              `Summarize this coding-session transcript into a dense brief for an agent continuing the work. ` +
+              `Include: completed steps, files touched and how, current task state, key decisions/constraints. ` +
+              `Max 250 words, no preamble.\n\n${transcript}`,
+          },
+        ],
+        maxTokens: 600,
+        temperature: 0,
+      });
+      for await (const ev of stream) {
+        if (ev.type === "text") summary += ev.delta;
+      }
+      return summary.trim() || "(summary unavailable)";
+    });
   }
 
   /** Install/replace the approval hook after construction (the TUI does this). */
@@ -66,15 +95,24 @@ export class Agent {
         }
         iterations++;
 
+        // Token discipline: compact before the call once history crosses the
+        // threshold; inside a single long turn, fall back to eliding old tool results.
+        if (this.context.needsCompaction()) {
+          const result = (await this.compact().catch(() => null)) ?? this.context.elideOldToolResults();
+          if (result) yield { type: "compaction", beforeTokens: result.before, afterTokens: result.after };
+        }
+
         let text = "";
         let toolCalls: ToolCallRequest[] = [];
 
         const stream = client.stream({
           model: config.model.primary,
           fallbackModels: config.model.fallbacks,
-          messages: this.context.build(buildSystemPrompt(cwd)),
+          messages: this.context.build(buildSystemPrompt(cwd, this.deps.repoMap)),
           tools: tools.schemas(),
           temperature: config.model.temperature,
+          cacheSystemPrompt: config.context.cacheSystemPrompt,
+          provider: config.openrouter.provider,
           signal,
         });
 

@@ -41,6 +41,7 @@ const HELP = `commands:
   /cost          session totals
   /sessions      recent sessions in this directory
   /resume <id>   resume a session
+  /compact       summarize old history now
   /clear         clear history
   /exit          quit
 keys: enter send · up/down history · esc cancel turn · y/n/a on permission prompts`;
@@ -130,6 +131,9 @@ export function App({ agent, store, sessionId: initialSession, cwd }: AppProps):
               store.recordUsage(sessionId, ev.usage);
               setStatusCost(agent.accounting.totals().cost);
               break;
+            case "compaction":
+              push({ kind: "info", text: `compacted history: ~${ev.beforeTokens} → ~${ev.afterTokens} tok` });
+              break;
             case "error":
               push({ kind: "error", text: ev.message });
               break;
@@ -207,6 +211,17 @@ export function App({ agent, store, sessionId: initialSession, cwd }: AppProps):
         case "/clear":
           agent.context.clear();
           push({ kind: "info", text: "history cleared" });
+          break;
+        case "/compact":
+          void agent.compact().then(
+            (r) =>
+              push(
+                r
+                  ? { kind: "info", text: `compacted: ~${r.before} → ~${r.after} tok` }
+                  : { kind: "info", text: "not enough history to compact" },
+              ),
+            (e) => push({ kind: "error", text: `compaction failed: ${(e as Error).message}` }),
+          );
           break;
         default:
           push({ kind: "info", text: `unknown command ${cmd} — /help` });

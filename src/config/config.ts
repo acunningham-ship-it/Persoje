@@ -9,6 +9,8 @@ const ConfigSchema = z.object({
       primary: z.string().default("openrouter/auto"),
       /** Fallback model ids tried by OpenRouter (the `models` array) when primary errors. */
       fallbacks: z.array(z.string()).default([]),
+      /** Model used for compaction summaries — grunt work, point it at a free model. Empty = primary. */
+      compactor: z.string().default(""),
       temperature: z.number().min(0).max(2).default(0.3),
     })
     .prefault({}),
@@ -20,6 +22,10 @@ const ConfigSchema = z.object({
       compactionThreshold: z.number().min(0.3).max(0.95).default(0.8),
       /** Turns kept at full fidelity during compaction. */
       keepFullTurns: z.number().default(4),
+      /** Repo-map token budget; 0 disables. */
+      repoMapTokens: z.number().default(800),
+      /** Attach a cache_control breakpoint to the system prompt (providers without caching ignore it). */
+      cacheSystemPrompt: z.boolean().default(true),
     })
     .prefault({}),
   loop: z
@@ -37,6 +43,11 @@ const ConfigSchema = z.object({
       baseUrl: z.string().default("https://openrouter.ai/api/v1"),
       /** Falls back to OPENROUTER_API_KEY env var. */
       apiKey: z.string().optional(),
+      /**
+       * OpenRouter provider routing passthrough, e.g. {"order": ["deepinfra"], "allow_fallbacks": true}.
+       * Pinning a provider keeps prompt-cache continuity on multi-provider models.
+       */
+      provider: z.record(z.string(), z.unknown()).optional(),
     })
     .prefault({}),
 });

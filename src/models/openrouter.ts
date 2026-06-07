@@ -44,6 +44,10 @@ export interface ChatRequest {
   tools?: ToolSchema[];
   temperature?: number;
   maxTokens?: number;
+  /** Mark the system prompt as a prompt-cache breakpoint (no-op on providers without explicit caching). */
+  cacheSystemPrompt?: boolean;
+  /** OpenRouter provider routing object (pinning providers preserves cache continuity). */
+  provider?: Record<string, unknown>;
   signal?: AbortSignal;
 }
 
@@ -71,9 +75,18 @@ export class OpenRouterClient {
    */
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     const started = Date.now();
+    // cache_control rides on multipart content; providers without explicit caching ignore it.
+    const messages: unknown[] = req.cacheSystemPrompt
+      ? req.messages.map((m) =>
+          m.role === "system"
+            ? { role: "system", content: [{ type: "text", text: m.content, cache_control: { type: "ephemeral" } }] }
+            : m,
+        )
+      : req.messages;
+
     const body: Record<string, unknown> = {
       model: req.model,
-      messages: req.messages,
+      messages,
       stream: true,
       usage: { include: true },
       temperature: req.temperature ?? 0.3,
@@ -81,6 +94,7 @@ export class OpenRouterClient {
     if (req.fallbackModels?.length) body.models = [req.model, ...req.fallbackModels];
     if (req.tools?.length) body.tools = req.tools;
     if (req.maxTokens) body.max_tokens = req.maxTokens;
+    if (req.provider) body.provider = req.provider;
 
     const response = await this.fetchWithRetry(body, req.signal);
     if (!response.body) throw new OpenRouterError("Empty response body", 0, false);

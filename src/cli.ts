@@ -8,6 +8,7 @@ import { ToolRegistry } from "./tools/types.ts";
 import { readTool, writeTool, editTool, lsTool, globTool } from "./tools/file-tools.ts";
 import { bashTool, grepTool } from "./tools/shell-tools.ts";
 import { SessionStore } from "./session/store.ts";
+import { buildRepoMap } from "./context/repo-map.ts";
 
 const VERSION = "0.1.0";
 
@@ -59,6 +60,9 @@ async function runTurn(agent: Agent, input: string): Promise<void> {
                 ` ${fmtCost(ev.usage.cost)}\n`,
             ),
           );
+          break;
+        case "compaction":
+          process.stdout.write(chalk.dim(`  ⇣ compacted ~${ev.beforeTokens} → ~${ev.afterTokens} tok\n`));
           break;
         case "error":
           process.stdout.write(chalk.red(`\n✗ ${ev.message}\n`));
@@ -113,7 +117,8 @@ async function main(): Promise<void> {
   const apiKey = resolveApiKey(config);
   const client = new OpenRouterClient(apiKey, config.openrouter.baseUrl);
   const cwd = process.cwd();
-  const agent = new Agent({ client, tools: buildRegistry(), config, cwd });
+  const repoMap = await buildRepoMap(cwd, config.context.repoMapTokens).catch(() => "");
+  const agent = new Agent({ client, tools: buildRegistry(), config, cwd, repoMap });
 
   // One-shot mode: persoje "do the thing" (no persistence, auto-approve)
   const flagsWithValue = new Set(["--model", "--resume"]);
@@ -140,6 +145,7 @@ async function main(): Promise<void> {
       sessionId = store.create(cwd, config.model.primary);
     }
     agent.context.onAppend = (msg) => store.appendMessage(sessionId, msg);
+    agent.context.onCompact = (messages) => store.replaceMessages(sessionId, messages);
 
     const { render } = await import("ink");
     const React = await import("react");

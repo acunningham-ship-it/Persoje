@@ -101,6 +101,15 @@ export class SessionStore {
     });
   }
 
+  /** Replace a session's stored messages wholesale (used after compaction). */
+  replaceMessages(sessionId: string, messages: readonly ChatMessage[]): void {
+    const tx = this.db.transaction(() => {
+      this.db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
+      for (const msg of messages) this.appendMessage(sessionId, msg);
+    });
+    tx();
+  }
+
   recordUsage(sessionId: string, u: UsageReport): void {
     this.db
       .prepare(
