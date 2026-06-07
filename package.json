@@ -24,7 +24,8 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/marked-terminal": "^6.1.1",
-    "@types/react": "^19.2.17"
+    "@types/react": "^19.2.17",
+    "react-devtools-core": "^7.0.1"
   },
   "peerDependencies": {
     "typescript": "^5"
