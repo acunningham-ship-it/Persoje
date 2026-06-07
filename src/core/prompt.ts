@@ -1,5 +1,5 @@
 /**
- * System prompt builder. Effort-aware, identity-driven.
+ * System prompt builder. Effort-aware, identity-driven, personality-infused.
  *
  * Effort levels control how the agent reasons:
  *   low  — quick answers, minimal tool use, skip verification
@@ -7,8 +7,13 @@
  *   high — thorough: explore broadly, verify every step, explain reasoning
  *   max  — exhaustive: full analysis, consider edge cases, never skip verification
  *
- * The prompt is structured so the static prefix is cache-friendly.
+ * Personality controls tone, verbosity, work ethic, formality, humor, code style.
+ *
+ * Skills are listed by name + description only (lazy-loaded on invocation).
  */
+
+import type { Personality } from "./personality.ts";
+import { personalityPrompt, DEFAULT_PERSONALITY } from "./personality.ts";
 
 export type EffortLevel = "low" | "mid" | "high" | "max";
 
@@ -19,7 +24,22 @@ const EFFORT_PROMPTS: Record<EffortLevel, string> = {
   max: `Effort: MAX. Be exhaustive. Full analysis before any action. Verify every step. Consider edge cases and failure modes. Never skip verification. Think step-by-step. Explore all relevant files before deciding.`,
 };
 
-export function buildSystemPrompt(cwd: string, repoMap = "", memory = "", effort: EffortLevel = "mid"): string {
+export function buildSystemPrompt(
+  cwd: string,
+  repoMap = "",
+  memory = "",
+  effort: EffortLevel = "mid",
+  personality?: Personality,
+  skillCatalog?: string,
+): string {
+  const personalitySection = personality
+    ? `\n\n${personalityPrompt(personality)}`
+    : `\n\n${personalityPrompt(DEFAULT_PERSONALITY)}`;
+
+  const skillSection = skillCatalog
+    ? `\n\n${skillCatalog}`
+    : "";
+
   return `You are Persoje, a coding agent in a terminal. cwd: ${cwd}
 
 Work by calling tools. Rules:
@@ -31,6 +51,8 @@ Work by calling tools. Rules:
 - Be concise. No filler.
 - Keep working until the task is fully done. Do not stop early or give up.
 - If something fails, debug it and try again. Iterate until it works.
-
-${EFFORT_PROMPTS[effort]}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${repoMap ? `\n\n${repoMap}` : ""}`;
+- You can create new skills with add_skill when you discover a reusable procedure.
+- You can invoke skills with invoke_skill when you need to follow a known procedure.
+- Skills are lazy-loaded: you see names + descriptions, but must invoke_skill to get the full content.
+${EFFORT_PROMPTS[effort]}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${repoMap ? `\n\n${repoMap}` : ""}${skillSection}`;
 }

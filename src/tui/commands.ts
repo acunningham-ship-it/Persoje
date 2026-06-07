@@ -25,6 +25,8 @@ export const COMMANDS: CommandMeta[] = [
   { name: "/dream", desc: "consolidate recent sessions into memory (free model)" },
   { name: "/effort", args: "low|mid|high|max", desc: "set thinking effort (depth, thoroughness)" },
   { name: "/theme", args: "[name]", desc: "switch color theme (amber, ocean, forest, rose, mono)" },
+  { name: "/mcp", args: "add|remove|connect|list|tools", desc: "manage MCP servers (add, remove, connect, list, tools)" },
+  { name: "/personality", args: "show|set|reset|custom", desc: "personality wizard: tone, verbosity, work ethic, etc." },
   { name: "/plan", args: "[on|off]", desc: "plan mode: think & spec before acting" },
   { name: "/autonomous", args: "on|off|status", desc: "toggle persistent mode (survives disconnect)" },
   { name: "/permsoff", desc: "auto-approve all tool calls (no confirmation)" },

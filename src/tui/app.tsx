@@ -15,6 +15,8 @@ import { renderMarkdown } from "./markdown.ts";
 import { COMMANDS, filterCommands, helpText } from "./commands.ts";
 import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar, AssistantBlock } from "./components.tsx";
 import { theme, getTheme, themeNames, type Theme } from "./theme.ts";
+import { loadPersonality, savePersonality, formatPersonality, PERSONALITY_OPTIONS, type Personality } from "../core/personality.ts";
+import type { McpManager } from "../mcp/client.ts";
 
 /** Single-width glyphs per tool — Persoje's geometric style. */
 const TOOL_ICON: Record<string, string> = {
@@ -59,6 +61,7 @@ export interface AppProps {
   lessons: LessonLog;
   facts: FactStore;
   skills: SkillLibrary;
+  mcp?: McpManager;
   /** model id → real context-window size, for the status gauge. */
   modelWindows: Map<string, number>;
 }
@@ -119,6 +122,7 @@ export function App({
   lessons,
   facts,
   skills,
+  mcp,
   modelWindows,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
@@ -612,11 +616,113 @@ export function App({
           push({ kind: "info", text: `▸ theme → ${name}` });
           break;
         }
-        default:
+        case "/mcp": {
+          const sub = rest[0];
+          if (!sub || sub === "list") {
+            const servers = mcp?.listServers() ?? {};
+            const names = Object.keys(servers);
+            if (names.length === 0) {
+              push({ kind: "info", text: "No MCP servers configured.\nusage: /mcp add <name> <command> [args...]\n       /mcp remove <name>\n       /mcp connect <name>\n       /mcp tools" });
+            } else {
+              const lines = names.map((n) => {
+                const s = servers[n]!;
+                return `  ${n}: ${s.command} ${(s.args ?? []).join(" ")}`;
+              });
+              push({ kind: "info", text: `MCP servers:\n${lines.join("\n")}` });
+            }
+            break;
+          }
+          if (sub === "add") {
+            const name = rest[1];
+            const command = rest[2];
+            if (!name || !command) {
+              push({ kind: "error", text: "usage: /mcp add <name> <command> [args...]" });
+              break;
+            }
+            const args = rest.slice(3);
+            mcp?.addServer(name, { command, args });
+            push({ kind: "info", text: `▸ MCP server "${name}" added: ${command} ${args.join(" ")}` });
+            break;
+          }
+          if (sub === "remove") {
+            const name = rest[1];
+            if (!name) { push({ kind: "error", text: "usage: /mcp remove <name>" }); break; }
+            const ok = mcp?.removeServer(name);
+            push({ kind: ok ? "info" : "error", text: ok ? `▸ MCP server "${name}" removed` : `MCP server "${name}" not found` });
+            break;
+          }
+          if (sub === "connect") {
+            const name = rest[1];
+            if (!name) { push({ kind: "error", text: "usage: /mcp connect <name>" }); break; }
+            mcp?.connect(name)
+              .then((conn: any) => push({ kind: "info", text: `▸ connected "${name}" — ${conn?.tools?.length ?? 0} tools discovered` }))
+              .catch((e: any) => push({ kind: "error", text: `MCP connect failed: ${e.message}` }));
+            break;
+          }
+          if (sub === "tools") {
+            const toolNames = mcp?.getToolNames() ?? [];
+            push({ kind: "info", text: toolNames.length ? `MCP tools:\n${toolNames.map((t: string) => `  ${t}`).join("\n")}` : "No MCP tools available. Connect servers first." });
+            break;
+          }
+          push({ kind: "error", text: `unknown /mcp subcommand: ${sub}` });
+          break;
+        }
+        case "/personality": {
+          const sub = rest[0];
+          const current = loadPersonality();
+          if (!sub || sub === "show") {
+            push({ kind: "info", text: `Current personality:\n${formatPersonality(current)}\n\n/personality set <trait> <value> — change a trait\n/personality reset — reset to defaults\n/personality custom <text> — set custom instructions` });
+            break;
+          }
+          if (sub === "set") {
+            const trait = rest[1] as keyof Personality;
+            const value = rest[2];
+            if (!trait || !value) {
+              const traits = Object.keys(PERSONALITY_OPTIONS).join(", ");
+              push({ kind: "error", text: `usage: /personality set <trait> <value>\ntraits: ${traits}` });
+              break;
+            }
+            const options = PERSONALITY_OPTIONS[trait as keyof typeof PERSONALITY_OPTIONS];
+            if (options && !options.includes(value)) {
+              push({ kind: "error", text: `"${value}" not valid for ${trait}. Options: ${options.join("/")}` });
+              break;
+            }
+            (current as any)[trait] = value;
+            savePersonality(current);
+            push({ kind: "info", text: `▸ personality.${trait} → ${value}` });
+            break;
+          }
+          if (sub === "reset") {
+            savePersonality({ tone: "professional", verbosity: "concise", workEthic: "driven", formality: "neutral", humor: "subtle", codeStyle: "clean", explanations: "brief", custom: "" });
+            push({ kind: "info", text: "▸ personality reset to defaults" });
+            break;
+          }
+          if (sub === "custom") {
+            const text = rest.slice(1).join(" ");
+            if (!text) { push({ kind: "error", text: "usage: /personality custom <text>" }); break; }
+            current.custom = text;
+            savePersonality(current);
+            push({ kind: "info", text: `▸ personality.custom → "${text}"` });
+            break;
+          }
+          push({ kind: "error", text: `unknown /personality subcommand: ${sub}` });
+          break;
+        }
+        default: {
+          // Check if it's a skill invocation: /skillname
+          const skillName = (cmd ?? "").slice(1); // remove leading /
+          const skill = skills.load(skillName);
+          if (skill) {
+            // Inject skill content as the task
+            void runTurn(`[Following skill: ${skill.name}]\n${skill.content}`);
+            break;
+          }
           push({ kind: "info", text: `unknown command ${cmd} — /help` });
+          break;
+        }
       }
     },
-    [agent, client, config, cwd, exit, facts, lessons, maybeCanary, profiles, push, router, runTurn, sessionId, skills, store],
+    [agent, client, config, cwd, exit, facts, lessons, maybeCanary, profiles, push, router, runTurn, sessionId, skills, store, mcp],
   );
 
   // Queued messages run as soon as the agent frees up.

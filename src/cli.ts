@@ -15,12 +15,23 @@ import { FactStore } from "./memory/facts.ts";
 import { LessonLog } from "./memory/lessons.ts";
 import { SkillLibrary } from "./memory/skills.ts";
 import { makeTaskTool } from "./agents/subagent.ts";
+import { makeAddSkillTool, makeInvokeSkillTool, makeListSkillsTool } from "./tools/skill-tools.ts";
+import { McpManager } from "./mcp/client.ts";
+import { loadPersonality } from "./core/personality.ts";
 
 const VERSION = "0.1.0";
 
-function buildRegistry(): ToolRegistry {
+function buildRegistry(skills: SkillLibrary, mcp?: McpManager): ToolRegistry {
   const registry = new ToolRegistry();
   for (const t of [readTool, writeTool, editTool, lsTool, globTool, bashTool, grepTool]) registry.register(t);
+  // Self-learning skill tools
+  registry.register(makeAddSkillTool(skills));
+  registry.register(makeInvokeSkillTool(skills));
+  registry.register(makeListSkillsTool(skills));
+  // MCP tools
+  if (mcp) {
+    for (const tool of mcp.getTools()) registry.register(tool);
+  }
   return registry;
 }
 
@@ -170,6 +181,16 @@ async function main(): Promise<void> {
   const facts = new FactStore(join(GLOBAL_CONFIG_DIR, "memory"));
   const lessons = new LessonLog(join(GLOBAL_CONFIG_DIR, "memory", "lessons.jsonl"));
   const skills = new SkillLibrary(join(GLOBAL_CONFIG_DIR, "skills"));
+  // Auto-prune unused skills on startup
+  const pruned = skills.prune();
+  if (pruned.length > 0) console.log(`Pruned ${pruned.length} unused skill(s): ${pruned.join(", ")}`);
+
+  // Personality: loaded from disk, controls agent behavior
+  const personality = loadPersonality();
+
+  // MCP: connect to configured servers
+  const mcp = new McpManager();
+  await mcp.connectAll();
   // Project guide written by /init — loaded whole (it's capped at ~60 lines).
   const projectGuide = await Bun.file(join(cwd, ".persoje", "PERSOJE.md"))
     .text()
@@ -184,8 +205,8 @@ async function main(): Promise<void> {
         .join("\n")
     : projectGuide;
 
-  const tools = buildRegistry();
-  const agent = new Agent({ client, tools, config, cwd, repoMap, memoryContext, skills });
+  const tools = buildRegistry(skills, mcp);
+  const agent = new Agent({ client, tools, config, cwd, repoMap, memoryContext, skills, personality });
   // The task tool lets the main model delegate to isolated sub-agents.
   // Pass full AgentDeps so subagents inherit repo-map, memory, skills.
   tools.register(makeTaskTool({ client, tools, config, cwd, repoMap, memoryContext, skills }));
@@ -232,7 +253,7 @@ async function main(): Promise<void> {
     const React = await import("react");
     const { App } = await import("./tui/app.tsx");
     const instance = render(
-      React.createElement(App, { agent, store, sessionId, cwd, router, profiles, client, config, lessons, facts, skills, modelWindows }),
+      React.createElement(App, { agent, store, sessionId, cwd, router, profiles, client, config, lessons, facts, skills, mcp, modelWindows }),
       { exitOnCtrlC: true },
     );
 

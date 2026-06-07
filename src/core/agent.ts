@@ -1,6 +1,7 @@
 import type { AgentEvent } from "./events.ts";
 import { Accounting } from "./tokens.ts";
 import { buildSystemPrompt } from "./prompt.ts";
+import { loadPersonality, type Personality } from "./personality.ts";
 import { ContextManager } from "../context/manager.ts";
 import { OpenRouterClient, type ToolCallRequest } from "../models/openrouter.ts";
 import { ToolError, type ToolContext, type ToolRegistry } from "../tools/types.ts";
@@ -21,7 +22,9 @@ export interface AgentDeps {
   /** Session-start memory block (fact index + recent lessons), bounded by config. */
   memoryContext?: string;
   /** Skill library — relevant skills are injected per user turn, not per session. */
-  skills?: { injectFor(taskText: string, maxTokens: number): string };
+  skills?: { injectFor(taskText: string, maxTokens: number): string; list(): Array<{ name: string; description: string }>; summaryForPrompt(): string };
+  /** Personality config — loaded from disk, controls tone/verbosity/etc. */
+  personality?: Personality;
   /**
    * Approval hook for mutating tools (bash/write/edit). Return false to deny.
    * Absent hook = auto-approve (plain REPL / one-shot mode).
@@ -132,7 +135,9 @@ export class Agent {
 
         // Effort-aware system prompt
         const effort = (config as any).effort?.level ?? "mid";
-        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort);
+        const personality = this.deps.personality ?? loadPersonality();
+        const skillCatalog = this.deps.skills?.summaryForPrompt() ?? "";
+        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort, personality, skillCatalog);
         // Use cache-optimized build when prompt caching is enabled — inserts
         // cache_control breakpoints at stable turn boundaries for maximum
         // cache hit rate on OpenRouter/Anthropic (50% cost on cached tokens).
