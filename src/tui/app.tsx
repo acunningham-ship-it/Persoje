@@ -318,6 +318,11 @@ export function App({
             case "compaction":
               push({ kind: "info", text: `⇣ compacted history: ~${ev.beforeTokens} → ~${ev.afterTokens} tok` });
               break;
+            case "retry": {
+              const delaySec = (ev.delayMs / 1000).toFixed(1);
+              setBusyLabel(`retry ${ev.attempt}/${ev.maxRetries} (${ev.reason}, ${delaySec}s)`);
+              break;
+            }
             case "error":
               push({ kind: "error", text: ev.message });
               break;

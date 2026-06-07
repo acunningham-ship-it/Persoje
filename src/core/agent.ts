@@ -148,6 +148,7 @@ export class Agent {
           cacheSystemPrompt: config.context.cacheSystemPrompt,
           provider: config.openrouter.provider,
           signal,
+          maxRetries: (config as any).retry?.maxRetries ?? 5,
         });
 
         for await (const ev of stream) {
@@ -159,6 +160,8 @@ export class Agent {
           } else if (ev.type === "usage") {
             this.accounting.record(ev.usage);
             yield { type: "usage", usage: ev.usage };
+          } else if (ev.type === "retry") {
+            yield { type: "retry", attempt: ev.attempt, maxRetries: ev.maxRetries, delayMs: ev.delayMs, reason: ev.reason };
           }
         }
         // Rescue: weak models emit tool calls as text instead of native tool_calls.

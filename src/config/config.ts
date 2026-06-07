@@ -36,6 +36,12 @@ const ConfigSchema = z.object({
       bashTimeoutMs: z.number().default(60_000),
     })
     .prefault({}),
+  retry: z
+    .object({
+      /** Max retry attempts for API calls (rate limits, server errors). Default 5. */
+      maxRetries: z.number().min(0).max(10).default(5),
+    })
+    .prefault({}),
   effort: z
     .object({
       /** Current effort level: low | mid | high | max */

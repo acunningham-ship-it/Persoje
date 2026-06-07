@@ -34,7 +34,8 @@ export interface ToolSchema {
 export type StreamEvent =
   | { type: "text"; delta: string }
   | { type: "tool-calls"; calls: ToolCallRequest[] }
-  | { type: "usage"; usage: UsageReport };
+  | { type: "usage"; usage: UsageReport }
+  | { type: "retry"; attempt: number; maxRetries: number; delayMs: number; reason: string };
 
 export interface ChatRequest {
   model: string;
@@ -49,6 +50,8 @@ export interface ChatRequest {
   /** OpenRouter provider routing object (pinning providers preserves cache continuity). */
   provider?: Record<string, unknown>;
   signal?: AbortSignal;
+  /** Max retry attempts (default 5). */
+  maxRetries?: number;
 }
 
 export class OpenRouterError extends Error {
@@ -61,7 +64,7 @@ export class OpenRouterError extends Error {
   }
 }
 
-const MAX_RETRIES = 3;
+const DEFAULT_MAX_RETRIES = 5;
 
 export class OpenRouterClient {
   constructor(
@@ -117,7 +120,12 @@ export class OpenRouterClient {
     if (req.maxTokens) body.max_tokens = req.maxTokens;
     if (req.provider) body.provider = req.provider;
 
-    const response = await this.fetchWithRetry(body, req.signal);
+    const maxRetries = req.maxRetries ?? DEFAULT_MAX_RETRIES;
+    const response = await this.fetchWithRetry(body, req.signal, maxRetries, (attempt, delayMs, reason) => {
+      // Emit retry event into the stream
+      // We can't yield from here, so we store it for the caller
+      this._lastRetryEvent = { type: "retry", attempt, maxRetries, delayMs, reason };
+    });
     if (!response.body) throw new OpenRouterError("Empty response body", 0, false);
 
     // Accumulate tool-call deltas by index (OpenAI streaming convention).
@@ -146,7 +154,7 @@ export class OpenRouterClient {
           const idx = tc.index ?? 0;
           const existing = toolCalls.get(idx) ?? { id: "", name: "", argsJson: "" };
           if (tc.id) existing.id = tc.id;
-          if (tc.function?.name) existing.name += tc.function.name;
+          if (tc.function?.name) existing.name += tc.function.function;
           if (tc.function?.arguments) existing.argsJson += tc.function.arguments;
           toolCalls.set(idx, existing);
         }
@@ -182,9 +190,28 @@ export class OpenRouterClient {
     }
   }
 
-  private async fetchWithRetry(body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
+  /** Last retry event (for the caller to surface to the user). */
+  private _lastRetryEvent: StreamEvent | null = null;
+  get lastRetryEvent(): StreamEvent | null {
+    return this._lastRetryEvent;
+  }
+
+  /**
+   * Smart retry with:
+   * - 5 retries by default
+   * - Retry-After header parsing
+   * - Error body parsing for "retry in X seconds" patterns
+   * - Formula: parsedWaitSeconds + 2 = total delay
+   * - Exponential backoff fallback: 1500 * 2^attempt + 2
+   */
+  private async fetchWithRetry(
+    body: Record<string, unknown>,
+    signal?: AbortSignal,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    onRetry?: (attempt: number, delayMs: number, reason: string) => void,
+  ): Promise<Response> {
     let lastError: OpenRouterError | null = null;
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: "POST",
@@ -206,14 +233,124 @@ export class OpenRouterClient {
         response.status,
         retryable,
       );
-      if (!retryable || attempt === MAX_RETRIES) throw lastError;
+      if (!retryable || attempt === maxRetries) throw lastError;
 
-      // Honor Retry-After when present (free models: ~20 req/min), else exponential backoff.
-      const retryAfter = Number(response.headers.get("retry-after"));
-      const delayMs = retryAfter > 0 ? retryAfter * 1000 : 1500 * 2 ** attempt;
+      // Smart delay calculation:
+      // 1. Check Retry-After header (standard HTTP)
+      // 2. Parse error body for "retry in X seconds" patterns
+      // 3. Fall back to exponential backoff
+      // Formula: parsedWaitSeconds + 2 additional seconds = total delay
+      const delayMs = this.calculateRetryDelay(response, text, attempt);
+
+      const reason = response.status === 429
+        ? "rate limited"
+        : response.status >= 500
+          ? "server error"
+          : "unknown";
+
+      onRetry?.(attempt + 1, delayMs, reason);
       await Bun.sleep(delayMs);
     }
     throw lastError ?? new OpenRouterError("unreachable", 0, false);
+  }
+
+  /**
+   * Calculate retry delay using the formula: parsedWaitSeconds + 2 = total delay.
+   *
+   * Priority:
+   * 1. Retry-After header (seconds or HTTP-date)
+   * 2. Error body patterns: "retry in X seconds", "wait Xs", "retry_after": X, etc.
+   * 3. Exponential backoff: 1500 * 2^attempt ms
+   *
+   * All paths add +2 seconds as the safety margin.
+   */
+  private calculateRetryDelay(response: Response, body: string, attempt: number): number {
+    const TWO_SEC = 2000;
+
+    // 1. Retry-After header
+    const retryAfterHeader = response.headers.get("retry-after");
+    if (retryAfterHeader) {
+      // Could be seconds (integer) or HTTP-date
+      const asSeconds = Number(retryAfterHeader);
+      if (asSeconds > 0 && Number.isFinite(asSeconds)) {
+        return asSeconds * 1000 + TWO_SEC;
+      }
+      // Try HTTP-date
+      const asDate = new Date(retryAfterHeader).getTime();
+      if (Number.isFinite(asDate)) {
+        const waitSec = Math.max(0, (asDate - Date.now()) / 1000);
+        return waitSec * 1000 + TWO_SEC;
+      }
+    }
+
+    // 2. Parse error body for wait-time hints
+    const bodyWait = this.parseRetryWaitFromBody(body);
+    if (bodyWait !== null) {
+      return bodyWait * 1000 + TWO_SEC;
+    }
+
+    // 3. Exponential backoff + 2s
+    return 1500 * 2 ** attempt + TWO_SEC;
+  }
+
+  /**
+   * Parse error response body for retry wait time hints.
+   * Handles patterns like:
+   * - "retry in 5 seconds", "retry in 5s", "retry after 10 seconds"
+   * - "wait 3 seconds", "wait 3s"
+   * - "retry_after": 5, "retryAfter": 5 (JSON)
+   * - "please wait 8 seconds before retrying"
+   * - "rate limit reset in 12.5 seconds"
+   * - "try again in 30s"
+   */
+  private parseRetryWaitFromBody(body: string): number | null {
+    // Try JSON first
+    try {
+      const json = JSON.parse(body);
+      // Common JSON fields
+      if (typeof json.retry_after === "number" && json.retry_after > 0) return json.retry_after;
+      if (typeof json.retryAfter === "number" && json.retryAfter > 0) return json.retryAfter;
+      if (typeof json.error?.retry_after === "number" && json.error.retry_after > 0) return json.error.retry_after;
+      // Nested message
+      if (typeof json.error?.message === "string") {
+        const parsed = this.extractSecondsFromText(json.error.message);
+        if (parsed !== null) return parsed;
+      }
+      if (typeof json.message === "string") {
+        const parsed = this.extractSecondsFromText(json.message);
+        if (parsed !== null) return parsed;
+      }
+    } catch {
+      // Not JSON — try text patterns
+    }
+
+    // Text patterns
+    return this.extractSecondsFromText(body);
+  }
+
+  /** Extract a wait time in seconds from freeform text. */
+  private extractSecondsFromText(text: string): number | null {
+    // Patterns (case-insensitive):
+    // "retry in X seconds", "retry in Xs", "retry after X seconds"
+    // "wait X seconds", "wait Xs"
+    // "try again in X seconds", "try again in Xs"
+    // "reset in X seconds", "rate limit reset in X seconds"
+    // "please wait X seconds before retrying"
+    const patterns = [
+      /(?:retry|try\s+again|wait|reset|rate\s+limit\s+reset)\s+(?:in|after|for)\s+(\d+(?:\.\d+)?)\s*s(?:ec(?:ond)?s?)?/i,
+      /(?:retry|try\s+again|wait|reset)\s+(?:in|after|for)\s+(\d+(?:\.\d+)?)\s*(?:seconds?|sec|s)\b/i,
+      /wait\s+(\d+(?:\.\d+)?)\s*(?:seconds?|sec|s)\b/i,
+      /please\s+wait\s+(\d+(?:\.\d+)?)\s*(?:seconds?|sec|s)\s+before\s+retrying/i,
+      /(\d+(?:\.\d+)?)\s*(?:seconds?|sec|s)\s+(?:before\s+)?(?:retry|retries|next\s+request)/i,
+    ];
+    for (const pat of patterns) {
+      const match = text.match(pat);
+      if (match && match[1]) {
+        const seconds = parseFloat(match[1]);
+        if (seconds > 0 && Number.isFinite(seconds)) return seconds;
+      }
+    }
+    return null;
   }
 }
 
