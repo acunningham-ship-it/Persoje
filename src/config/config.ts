@@ -79,6 +79,12 @@ const ConfigSchema = z.object({
       provider: z.record(z.string(), z.unknown()).optional(),
     })
     .prefault({}),
+  theme: z
+    .object({
+      /** Theme name: amber (default), ocean, forest, rose, mono */
+      name: z.enum(["amber", "ocean", "forest", "rose", "mono"]).default("amber"),
+    })
+    .prefault({}),
 });
 
 export type PersojeConfig = z.infer<typeof ConfigSchema>;

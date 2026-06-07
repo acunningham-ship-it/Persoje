@@ -78,11 +78,18 @@ export class SessionStore {
     this.db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(Date.now(), sessionId);
   }
 
-  /** First user message becomes the session title (truncated). */
+  /** First user message becomes the session title — auto-extract a topic slug. */
   maybeSetTitle(sessionId: string, text: string): void {
+    // Generate a short topic slug from the first user message
+    // e.g., "rewrite the auth module to use JWT" → "auth-jwt-rewrite"
+    const lower = text.toLowerCase().replace(/[^a-z0-9\s-]/g, "");
+    // Extract key nouns/verbs (words > 3 chars, skip common stop words)
+    const stopWords = new Set(["that", "this", "with", "from", "have", "been", "will", "would", "could", "should", "about", "into", "just", "also", "more", "some", "what", "when", "where", "which", "there", "their", "they", "them", "then", "than", "very", "much", "does", "done", "only", "want", "need", "make", "like", "using", "used", "being", "going"]);
+    const words = lower.split(/\s+/).filter((w) => w.length > 3 && !stopWords.has(w));
+    const slug = words.slice(0, 4).join("-").slice(0, 50) || lower.slice(0, 50);
     this.db
       .prepare("UPDATE sessions SET title = ? WHERE id = ? AND title = ''")
-      .run(text.slice(0, 80), sessionId);
+      .run(slug, sessionId);
   }
 
   loadMessages(sessionId: string): ChatMessage[] {

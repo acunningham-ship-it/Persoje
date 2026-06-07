@@ -92,12 +92,17 @@ export class OpenRouterClient {
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     const started = Date.now();
     // cache_control rides on multipart content; providers without explicit caching ignore it.
+    // If messages already have multipart content (from buildWithCacheBreakpoints), pass through.
+    // Otherwise, wrap the system prompt in multipart format with cache_control.
     const messages: unknown[] = req.cacheSystemPrompt
-      ? req.messages.map((m) =>
-          m.role === "system"
-            ? { role: "system", content: [{ type: "text", text: m.content, cache_control: { type: "ephemeral" } }] }
-            : m,
-        )
+      ? req.messages.map((m) => {
+          // Already multipart (array content) — pass through as-is
+          if (Array.isArray(m.content)) return m;
+          // System prompt gets cache breakpoint
+          if (m.role === "system")
+            return { role: "system", content: [{ type: "text", text: m.content, cache_control: { type: "ephemeral" } }] };
+          return m;
+        })
       : req.messages;
 
     const body: Record<string, unknown> = {

@@ -1,16 +1,17 @@
 /**
  * Autonomous mode — Persoje survives SSH disconnects, terminal closes, and crashes.
  *
- * Strategy: self-contained, no external deps beyond tmux (which is already available).
- * - Wraps the current persoje process in a tmux session
- * - Writes a watchdog script that health-checks every 30s
- * - Logs all output to a persistent file
- * - On reconnect, user reattaches with `tmux attach`
+ * Strategy: zero external dependencies. Pure bash + nohup + watchdog.
+ * - Forks a new persoje process with nohup (survives SIGHUP on terminal close)
+ * - Writes a watchdog script that health-checks the PID every 30s
+ * - All output logged to a persistent file
+ * - On reconnect: `tail -f ~/.local/share/persoje-autonomous/session.log`
+ * - Watchdog auto-restarts on crash
  *
- * No systemd, no cron, no extra packages. Just bash + tmux.
+ * No tmux, no systemd, no cron, no extra packages. Just bash.
  */
 
-import { execSync, spawn, exec } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -18,10 +19,10 @@ import { homedir } from "node:os";
 const HOME = homedir();
 const DIR = join(HOME, ".local", "share", "persoje-autonomous");
 const LOG_FILE = join(DIR, "session.log");
-const PID_FILE = join(DIR, "watchdog.pid");
+const PERSOJE_PID_FILE = join(DIR, "persoje.pid");
+const WATCHDOG_PID_FILE = join(DIR, "watchdog.pid");
 const STATE_FILE = join(DIR, "state.json");
 const WATCHDOG_SCRIPT = join(DIR, "watchdog.sh");
-const SESSION = "persoje-auto";
 
 type PushFn = (item: { kind: "info" | "error"; text: string }) => void;
 
@@ -41,12 +42,23 @@ function ensureDir() {
   mkdirSync(DIR, { recursive: true });
 }
 
-function tmuxRunning(): boolean {
+/** Check if a PID is alive. */
+function pidAlive(pid: number): boolean {
   try {
-    execSync(`tmux has-session -t ${SESSION} 2>/dev/null`, { stdio: "pipe" });
+    process.kill(pid, 0); // signal 0 = check existence
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Read PID from file, return 0 if not found or invalid. */
+function readPid(file: string): number {
+  try {
+    const pid = parseInt(readFileSync(file, "utf8").trim(), 10);
+    return pid > 0 ? pid : 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -68,28 +80,41 @@ function writeWatchdogScript() {
   ensureDir();
   const script = `#!/usr/bin/env bash
 # Persoje Autonomous Watchdog
-# Checks every 30s if the tmux session is alive. If not, restarts it.
-# Kills itself when stopped via the pid file.
+# Checks every 30s if the persoje process is alive. If not, restarts it.
+# Kills itself when stopped via the stop-watchdog sentinel file.
 
-PID_FILE="${PID_FILE}"
-SESSION="${SESSION}"
+PERSOJE_PID_FILE="${PERSOJE_PID_FILE}"
+WATCHDOG_PID_FILE="${WATCHDOG_PID_FILE}"
 LOG="${LOG_FILE}"
+DIR="${DIR}"
 
 echo "[$(date -Iseconds)] watchdog started (pid $$)" >> "$LOG"
-echo $$ > "$PID_FILE"
+echo $$ > "$WATCHDOG_PID_FILE"
 
 while true; do
-  if [ -f "${DIR}/stop-watchdog" ]; then
-    rm -f "${DIR}/stop-watchdog"
+  # Check for stop signal
+  if [ -f "$DIR/stop-watchdog" ]; then
+    rm -f "$DIR/stop-watchdog"
     echo "[$(date -Iseconds)] watchdog stopped by request" >> "$LOG"
-    rm -f "$PID_FILE"
+    rm -f "$WATCHDOG_PID_FILE"
     exit 0
   fi
 
-  if ! tmux has-session -t "$SESSION" 2>/dev/null; then
-    echo "[$(date -Iseconds)] session dead — restarting persoje" >> "$LOG"
-    tmux new-session -d -s "$SESSION" -x 200 -y 50 \\
-      "persoje 2>&1 | tee -a '$LOG'"
+  # Check if persoje is alive
+  PERSOJE_PID=0
+  if [ -f "$PERSOJE_PID_FILE" ]; then
+    PERSOJE_PID=$(cat "$PERSOJE_PID_FILE" 2>/dev/null || echo 0)
+  fi
+
+  if [ "$PERSOJE_PID" -gt 0 ] && kill -0 "$PERSOJE_PID" 2>/dev/null; then
+    : # persoje is alive, do nothing
+  else
+    echo "[$(date -Iseconds)] persoje dead (pid $PERSOJE_PID) — restarting" >> "$LOG"
+    # Start persoje in background with nohup
+    nohup persoje >> "$LOG" 2>&1 &
+    NEW_PID=$!
+    echo "$NEW_PID" > "$PERSOJE_PID_FILE"
+    echo "[$(date -Iseconds)] restarted persoje (pid $NEW_PID)" >> "$LOG"
   fi
 
   sleep 30
@@ -101,7 +126,6 @@ done
 
 function startWatchdog() {
   writeWatchdogScript();
-  // Start watchdog as a detached background process
   const child = spawn("bash", [WATCHDOG_SCRIPT], {
     detached: true,
     stdio: "ignore",
@@ -110,17 +134,20 @@ function startWatchdog() {
 }
 
 function stopWatchdog() {
-  // Signal the watchdog to stop
+  // Signal the watchdog to stop via sentinel file
   writeFileSync(join(DIR, "stop-watchdog"), "");
   // Also try killing by PID
-  try {
-    const pid = parseInt(readFileSync(PID_FILE, "utf8").trim(), 10);
-    if (pid > 0) process.kill(pid, 0); // check alive
-    process.kill(pid, "SIGTERM");
-  } catch {
-    // already dead, fine
+  const pid = readPid(WATCHDOG_PID_FILE);
+  if (pid > 0 && pidAlive(pid)) {
+    try { process.kill(pid, "SIGTERM"); } catch { /* already dead */ }
   }
-  try { rmSync(PID_FILE); } catch { /* ok */ }
+  try { rmSync(WATCHDOG_PID_FILE); } catch { /* ok */ }
+}
+
+/** Check if the autonomous persoje daemon is running. */
+function persojeRunning(): boolean {
+  const pid = readPid(PERSOJE_PID_FILE);
+  return pid > 0 && pidAlive(pid);
 }
 
 /** Enable auto-approve for all tools (the /permsoff behavior). */
@@ -140,68 +167,71 @@ export async function autonomousCmd(sub: string, ctx: AutonomousCtx): Promise<vo
       permsoff(ctx);
       push({ kind: "info", text: "🔓 all tools auto-approved" });
 
-      // Step 2: Check if already in a tmux session
-      const inTmux = !!process.env.TMUX;
-      if (inTmux) {
-        push({ kind: "info", text: "✓ already running inside tmux — you're protected" });
-        push({ kind: "info", text: "  If SSH drops, reconnect and run: tmux attach" });
-        setState({ autonomous: true, protected: true, since: new Date().toISOString() });
-        return;
-      }
-
-      // Step 3: Not in tmux — we need to re-exec ourselves inside one.
-      // We can't move a running process into tmux, so we:
-      //   a) Start a NEW persoje in a tmux session
-      //   b) Tell the user to attach to it
-      //   c) Start the watchdog
-      if (tmuxRunning()) {
-        push({ kind: "info", text: "✓ autonomous tmux session already exists" });
-        push({ kind: "info", text: "  Run: tmux attach -t persoje-auto" });
+      // Step 2: Check if daemon is already running
+      if (persojeRunning()) {
+        const pid = readPid(PERSOJE_PID_FILE);
+        push({ kind: "info", text: `✓ autonomous persoje already running (pid ${pid})` });
+        push({ kind: "info", text: `  Monitor: tail -f ${LOG_FILE}` });
       } else {
+        // Step 3: Start persoje as a background daemon with nohup
         try {
-          execSync(
-            `tmux new-session -d -s ${SESSION} -x 200 -y 50 "persoje 2>&1 | tee -a '${LOG_FILE}'"`,
-            { stdio: "pipe" },
-          );
-          push({ kind: "info", text: "✓ launched persoje in tmux session: persoje-auto" });
+          // Write a launcher script that captures the PID
+          const launcherScript = `#!/usr/bin/env bash
+nohup persoje >> "${LOG_FILE}" 2>&1 &
+echo $! > "${PERSOJE_PID_FILE}"
+`;
+          const launcherPath = join(DIR, "launch.sh");
+          writeFileSync(launcherPath, launcherScript);
+          execSync(`chmod +x "${launcherPath}" && bash "${launcherPath}"`, { stdio: "pipe" });
+
+          const pid = readPid(PERSOJE_PID_FILE);
+          push({ kind: "info", text: `✓ launched persoje daemon (pid ${pid})` });
         } catch (e) {
-          push({ kind: "error", text: `failed to create tmux session: ${(e as Error).message}` });
+          push({ kind: "error", text: `failed to start daemon: ${(e as Error).message}` });
           return;
         }
       }
 
       // Step 4: Start watchdog
-      startWatchdog();
-      push({ kind: "info", text: "✓ watchdog started — auto-restarts on crash every 30s" });
+      const watchdogPid = readPid(WATCHDOG_PID_FILE);
+      if (watchdogPid > 0 && pidAlive(watchdogPid)) {
+        push({ kind: "info", text: "✓ watchdog already running" });
+      } else {
+        startWatchdog();
+        push({ kind: "info", text: "✓ watchdog started — auto-restarts on crash every 30s" });
+      }
 
       // Step 5: Log state
       setState({ autonomous: true, protected: true, since: new Date().toISOString(), watchdog: true });
       push({ kind: "info", text: "" });
       push({ kind: "info", text: "━━━ Autonomous Mode Active ━━━" });
-      push({ kind: "info", text: "  • Survives SSH disconnects" });
+      push({ kind: "info", text: "  • Survives SSH disconnects (nohup)" });
       push({ kind: "info", text: "  • Survives terminal closes" });
-      push({ kind: "info", text: "  • Auto-restarts on crash (30s)" });
+      push({ kind: "info", text: "  • Auto-restarts on crash (30s watchdog)" });
       push({ kind: "info", text: "  • All tools auto-approved" });
-      push({ kind: "info", text: "  • Log: ~/.local/share/persoje-autonomous/session.log" });
+      push({ kind: "info", text: `  • Log: ${LOG_FILE}` });
       push({ kind: "info", text: "" });
-      push({ kind: "info", text: "  Reconnect: tmux attach -t persoje-auto" });
-      push({ kind: "info", text: "  Stop:      /autonomous off" });
+      push({ kind: "info", text: `  Monitor: tail -f ${LOG_FILE}` });
+      push({ kind: "info", text: "  Stop:    /autonomous off" });
       break;
     }
 
     case "off": {
       // Stop watchdog
       stopWatchdog();
+      push({ kind: "info", text: "✓ watchdog stopped" });
 
-      // Kill tmux session
-      if (tmuxRunning()) {
+      // Kill the daemon process
+      const pid = readPid(PERSOJE_PID_FILE);
+      if (pid > 0 && pidAlive(pid)) {
         try {
-          execSync(`tmux kill-session -t ${SESSION}`, { stdio: "pipe" });
-          push({ kind: "info", text: "✓ stopped autonomous tmux session" });
+          process.kill(pid, "SIGTERM");
+          push({ kind: "info", text: `✓ stopped persoje daemon (pid ${pid})` });
         } catch {
-          push({ kind: "error", text: "failed to kill tmux session" });
+          push({ kind: "error", text: "failed to kill daemon process" });
         }
       }
+      try { rmSync(PERSOJE_PID_FILE); } catch { /* ok */ }
 
       setState({ autonomous: false, protected: false });
       push({ kind: "info", text: "🔒 autonomous mode off — approval prompts re-enabled" });
@@ -211,14 +241,18 @@ export async function autonomousCmd(sub: string, ctx: AutonomousCtx): Promise<vo
     case "status":
     default: {
       const state = getState();
-      const running = tmuxRunning();
+      const running = persojeRunning();
       const lines: string[] = ["━━━ Autonomous Status ━━━"];
 
       if (state.autonomous || running) {
+        const pid = readPid(PERSOJE_PID_FILE);
+        const watchdogPid = readPid(WATCHDOG_PID_FILE);
+        const watchdogAlive = watchdogPid > 0 && pidAlive(watchdogPid);
+
         lines.push(`  Mode:      ${state.autonomous ? "🟢 ON" : "🔴 OFF"}`);
-        lines.push(`  Session:   ${running ? "✓ running" : "✗ not running"}`);
+        lines.push(`  Daemon:    ${running ? `✓ running (pid ${pid})` : "✗ not running"}`);
         lines.push(`  Since:     ${state.since || "unknown"}`);
-        lines.push(`  Watchdog:  ${existsSync(PID_FILE) ? "✓ running" : "✗ stopped"}`);
+        lines.push(`  Watchdog:  ${watchdogAlive ? `✓ running (pid ${watchdogPid})` : "✗ stopped"}`);
         lines.push(`  Log:       ${LOG_FILE}`);
 
         // Show last 3 lines of log

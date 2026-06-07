@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
 import type { CommandMeta } from "./commands.ts";
-import { theme } from "./theme.ts";
+import { theme, getTheme, type Theme } from "./theme.ts";
 
 // Dependency-free gradient: interpolate per-character between two hex stops.
 function gradient(text: string, from: [number, number, number], to: [number, number, number]): React.ReactElement[] {
@@ -26,34 +26,42 @@ export function Banner({
   cwd,
   routerState,
   effort,
+  sessionTitle,
+  activeTheme,
 }: {
   version: string;
   model: string;
   cwd: string;
   routerState: string;
   effort?: string;
+  sessionTitle?: string;
+  activeTheme?: Theme;
 }): React.ReactElement {
+  const t = activeTheme ?? theme;
   const home = process.env.HOME ?? "";
   const shortCwd = home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
   const effortLabel = effort ? ` · effort ${effort}` : "";
+  const titleSuffix = sessionTitle ? ` · ${sessionTitle}` : "";
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Box
         borderStyle="round"
-        borderColor={theme.accent2}
+        borderColor={t.accent2}
         paddingX={1}
         flexDirection="column"
         alignSelf="flex-start"
       >
         <Text>
-          {gradient("◆ persoje", [232, 163, 23], [199, 139, 13])}
+          {gradient("◆ persoje", t.gradFrom, t.gradTo)}
           <Text dimColor> v{version}</Text>
+          {sessionTitle ? <Text dimColor> · </Text> : null}
+          {sessionTitle ? <Text color={t.accent}>{sessionTitle}</Text> : null}
         </Text>
         <Box marginTop={1}>
           <Text dimColor>model </Text>
-          <Text color={theme.accent}>{model}</Text>
+          <Text color={t.accent}>{model}</Text>
           <Text dimColor> · cwd </Text>
-          <Text color={theme.accent}>{shortCwd}</Text>
+          <Text color={t.accent}>{shortCwd}</Text>
           <Text dimColor> · router {routerState}{effortLabel}</Text>
         </Box>
         <Text dimColor>/help · / for menu · esc interrupts · /effort low|mid|high|max</Text>
@@ -139,6 +147,8 @@ export function StatusBar({
   routerOff,
   effort,
   iterations,
+  planMode,
+  activeTheme,
 }: {
   model: string;
   ctxUsed: number;
@@ -150,25 +160,28 @@ export function StatusBar({
   routerOff: boolean;
   effort?: string;
   iterations?: number;
+  planMode?: boolean;
+  activeTheme?: Theme;
 }): React.ReactElement {
+  const t = activeTheme ?? theme;
   const [, force] = useState(0);
   useEffect(() => {
     if (!busy) return;
-    const t = setInterval(() => force((n) => n + 1), 1000);
-    return () => clearInterval(t);
+    const iv = setInterval(() => force((n) => n + 1), 1000);
+    return () => clearInterval(iv);
   }, [busy]);
 
   const pct = Math.min(100, Math.round((ctxUsed / ctxBudget) * 100));
   const filled = Math.min(10, Math.round(pct / 10));
   const bar = "█".repeat(filled) + "░".repeat(10 - filled);
-  const barColor = pct < 50 ? theme.ok : pct < 80 ? theme.warn : theme.err;
+  const barColor = pct < 50 ? t.ok : pct < 80 ? t.warn : t.err;
   const sep = <Text dimColor> │ </Text>;
 
-  const effortColors: Record<string, string> = { low: theme.dim, mid: theme.accent, high: theme.warn, max: theme.err };
+  const effortColors: Record<string, string> = { low: t.dim, mid: t.accent, high: t.warn, max: t.err };
 
   return (
     <Box paddingX={1}>
-      <Text color={theme.accent}>⬡ </Text>
+      <Text color={t.accent}>⬡ </Text>
       <Text dimColor>{model}</Text>
       {sep}
       <Text dimColor>{fmtTok(ctxUsed)}/{fmtTok(ctxBudget)} </Text>
@@ -179,13 +192,19 @@ export function StatusBar({
       {effort ? (
         <>
           {sep}
-          <Text color={effortColors[effort] ?? theme.accent}>▸ {effort}</Text>
+          <Text color={effortColors[effort] ?? t.accent}>▸ {effort}</Text>
+        </>
+      ) : null}
+      {planMode ? (
+        <>
+          {sep}
+          <Text color={t.warn}>📋 PLAN</Text>
         </>
       ) : null}
       {busy ? (
         <>
           {sep}
-          <Text color={theme.accent}>⏱ {fmtSecs(Math.floor((Date.now() - turnStart) / 1000))}</Text>
+          <Text color={t.accent}>⏱ {fmtSecs(Math.floor((Date.now() - turnStart) / 1000))}</Text>
           {iterations != null && iterations > 0 ? <Text dimColor> · iter {iterations}</Text> : null}
         </>
       ) : null}

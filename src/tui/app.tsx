@@ -14,7 +14,7 @@ import { runCanary, qualityFromScore } from "../router/canary.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { COMMANDS, filterCommands, helpText } from "./commands.ts";
 import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar, AssistantBlock } from "./components.tsx";
-import { theme } from "./theme.ts";
+import { theme, getTheme, themeNames, type Theme } from "./theme.ts";
 
 /** Single-width glyphs per tool — Persoje's geometric style. */
 const TOOL_ICON: Record<string, string> = {
@@ -64,7 +64,18 @@ export interface AppProps {
 }
 
 function fmtCost(cost: number): string {
-  return cost < 0.01 ? `$${cost.toFixed(5)}` : `$${cost.toFixed(3)}`;
+  return cost < 0.01 ? `${cost.toFixed(5)}` : `${cost.toFixed(3)}`;
+}
+
+function timeAgo(ts: number): string {
+  const sec = Math.floor((Date.now() - ts) / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  return `${days}d ago`;
 }
 
 /** One-glance argument summary per tool — what Claude Code shows in its ⏺ lines. */
@@ -125,6 +136,29 @@ export function App({
   const [queue, setQueue] = useState<string[]>([]);
   const [statusCost, setStatusCost] = useState(0);
   const [turnIterations, setTurnIterations] = useState(0);
+  const [pickerSessions, setPickerSessions] = useState<import("../session/store.ts").SessionMeta[]>([]);
+  const [pickerSelected, setPickerSelected] = useState(0);
+  const [activeTheme, setActiveTheme] = useState<Theme>(() => getTheme((config as any).theme?.name ?? "amber"));
+  const [sessionTitle, setSessionTitle] = useState<string>(() => store.get(initialSession)?.title ?? "");
+  const [greeted, setGreeted] = useState(false);
+
+  // Pleasant greeting on first render
+  useEffect(() => {
+    if (greeted) return;
+    setGreeted(true);
+    const greetings = [
+      "ready to build something great",
+      "what are we working on today",
+      "let's get to it",
+      "at your service",
+      "what's on your mind",
+      "let's make something happen",
+      "firing up the engines",
+      "what shall we create",
+    ];
+    const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+    push({ kind: "info", text: `◆ ${greeting}` });
+  }, []);
   const abortRef = useRef<AbortController | null>(null);
   const alwaysAllow = useRef(new Set<string>());
   const streamBuf = useRef("");
@@ -132,6 +166,15 @@ export function App({
 
   const menuItems = !busy && !pending ? filterCommands(input) : [];
   const menuVisible = menuItems.length > 0;
+
+  // Sync terminal title with session name
+  useEffect(() => {
+    process.title = sessionTitle ? `persoje · ${sessionTitle}` : "persoje";
+    // Also set the xterm escape sequence for terminals that support it
+    if (process.stdout.isTTY) {
+      process.stdout.write(`\x1b]0;${process.title}\x07`);
+    }
+  }, [sessionTitle]);
 
   const push = useCallback((item: DistOmit<DisplayItem, "id">) => {
     setItems((prev) => [...prev, { ...item, id: nextId++ } as DisplayItem]);
@@ -224,6 +267,9 @@ export function App({
       setBusyStart(Date.now());
       push({ kind: "user", text: task });
       store.maybeSetTitle(sessionId, task);
+      // Update session title state for terminal header + banner
+      const meta = store.get(sessionId);
+      if (meta?.title) setSessionTitle(meta.title);
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -347,16 +393,19 @@ export function App({
           const p = profiles.get(agent.model);
           const t = agent.accounting.totals();
           const factCount = facts.index().split("\n").filter(Boolean).length;
+          const stats = agent.context.buildStats();
           push({
             kind: "info",
             text: [
               `model      ${agent.model} (${p.toolQuality}${p.canary ? `, canary ${p.canary.score}/${p.canary.total}` : ""})`,
               `router     ${router.enabled ? "on" : "off"} · ${router.mode} · ${router.failureCount(agent.model)} recent failures`,
-              `session    ${sessionId} · ~${agent.context.estimateTokensUsed()} tok history · ${fmtCost(t.cost)}`,
+              `session    ${sessionId} · ~${stats.totalTokens} tok history · ${fmtCost(t.cost)}`,
+              `context    ${stats.totalMessages} msgs · ${stats.elidedCount} elided · ${stats.cacheBreakpoints} cache pts · prefix ${stats.prefixStable ? "stable ✓" : "dirty"}`,
               `memory     ${factCount} facts · ${lessons.recent(100).length} lessons · ${skills.list().length} skills`,
               `repo-map   ${agent.repoMap ? `~${Math.ceil(agent.repoMap.length / 4)} tok` : "none"}`,
               `config     ~/.config/persoje/config.json · budget ${config.context.budgetTokens} tok`,
-            ].join("\n"),
+              (config as any).planMode ? `plan       📋 ON — will spec before acting` : null,
+            ].filter(Boolean).join("\n"),
           });
           break;
         }
@@ -376,31 +425,39 @@ export function App({
             });
           }
           break;
-        case "/sessions": {
-          const sessions = store.list(cwd, 10);
-          push({
-            kind: "info",
-            text:
-              sessions.length === 0
-                ? "no sessions in this directory"
-                : sessions.map((s) => `${s.id}  ${s.title || "(untitled)"}  ${s.messageCount} msgs  ${fmtCost(s.totalCost)}`).join("\n"),
-          });
-          break;
-        }
         case "/resume": {
-          const id = rest[0];
-          if (!id) {
-            push({ kind: "info", text: "usage: /resume <session-id> (see /sessions)" });
+          if (!rest[0]) {
+            // Enter interactive session picker
+            const sessions = store.list(cwd, 20);
+            if (sessions.length === 0) {
+              push({ kind: "info", text: "no sessions in this directory" });
+            } else {
+              setPickerSessions(sessions);
+              setPickerSelected(0);
+            }
             break;
           }
-          const meta = store.get(id);
-          if (!meta) {
-            push({ kind: "error", text: `no session ${id}` });
+          // Resume by number or title substring (direct, no picker)
+          const sessions = store.list(cwd, 20);
+          const query = rest.join(" ");
+          let target: string | null = null;
+          const num = parseInt(query, 10);
+          if (num > 0 && num <= sessions.length) {
+            target = sessions[num - 1]!.id;
+          } else {
+            const lower = query.toLowerCase();
+            const match = sessions.find((s) => s.title.toLowerCase().includes(lower));
+            if (match) target = match.id;
+          }
+          if (!target) {
+            push({ kind: "error", text: `no session matching "${query}" — use /resume to pick` });
             break;
           }
-          agent.context.restore(store.loadMessages(id));
-          setSessionId(id);
-          push({ kind: "info", text: `resumed ${id} (${meta.messageCount} messages, ~${agent.context.estimateTokensUsed()} tok)` });
+          const meta = store.get(target);
+          agent.context.restore(store.loadMessages(target));
+          setSessionId(target);
+          if (meta?.title) setSessionTitle(meta.title);
+          push({ kind: "info", text: `resumed '${meta?.title || target}' (${meta?.messageCount} messages, ~${agent.context.estimateTokensUsed()} tok)` });
           break;
         }
         case "/compact":
@@ -511,11 +568,43 @@ export function App({
           push({ kind: "info", text: `▸ effort → ${level} (temperature ${config.model.temperature})` });
           break;
         }
+        case "/plan": {
+          const sub = rest[0];
+          if (sub === "on") {
+            (config as any).planMode = true;
+            push({ kind: "info", text: "📋 plan mode ON — will generate implementation spec before executing" });
+          } else if (sub === "off") {
+            (config as any).planMode = false;
+            push({ kind: "info", text: "📋 plan mode OFF" });
+          } else {
+            // Toggle
+            (config as any).planMode = !(config as any).planMode;
+            push({ kind: "info", text: `📋 plan mode ${(config as any).planMode ? "ON — will spec before acting" : "OFF"}` });
+          }
+          break;
+        }
         case "/autonomous": {
           const sub = rest[0] || "status";
           void import("../core/autonomous.ts")
             .then(({ autonomousCmd }) => autonomousCmd(sub, { push, alwaysAllow, exit, agent }))
             .catch((e) => push({ kind: "error", text: `autonomous: ${(e as Error).message}` }));
+          break;
+        }
+        case "/theme": {
+          const name = rest[0];
+          if (!name) {
+            const current = (config as any).theme?.name ?? "amber";
+            push({ kind: "info", text: `theme: ${current}\navailable: ${themeNames.join(", ")}\nusage: /theme <name>` });
+            break;
+          }
+          if (!themeNames.includes(name)) {
+            push({ kind: "error", text: `unknown theme "${name}" — available: ${themeNames.join(", ")}` });
+            break;
+          }
+          if (!(config as any).theme) (config as any).theme = {};
+          (config as any).theme.name = name;
+          setActiveTheme(getTheme(name));
+          push({ kind: "info", text: `▸ theme → ${name}` });
           break;
         }
         default:
@@ -550,6 +639,35 @@ export function App({
         setPending(null);
       }
       return;
+    }
+
+    // Session picker: arrow keys navigate, Enter selects, Escape cancels.
+    if (pickerSessions.length > 0) {
+      if (key.upArrow) {
+        setPickerSelected((s) => Math.max(0, s - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setPickerSelected((s) => Math.min(pickerSessions.length - 1, s + 1));
+        return;
+      }
+      if (key.escape) {
+        setPickerSessions([]);
+        setPickerSelected(0);
+        return;
+      }
+      if (key.return) {
+        const chosen = pickerSessions[pickerSelected]!;
+        const meta = store.get(chosen.id);
+        agent.context.restore(store.loadMessages(chosen.id));
+        setSessionId(chosen.id);
+        if (meta?.title) setSessionTitle(meta.title);
+        setPickerSessions([]);
+        setPickerSelected(0);
+        push({ kind: "info", text: `resumed '${meta?.title || chosen.id}' (${meta?.messageCount} messages, ~${agent.context.estimateTokensUsed()} tok)` });
+        return;
+      }
+      return; // swallow all other keys while picker is open
     }
 
     const submit = (raw: string) => {
@@ -654,6 +772,8 @@ export function App({
                 cwd={cwd}
                 routerState={`${router.enabled ? "on" : "off"} (${router.mode})`}
                 effort={(config as any).effort?.level ?? "mid"}
+                sessionTitle={sessionTitle || undefined}
+                activeTheme={activeTheme}
               />
             );
           }
@@ -661,7 +781,7 @@ export function App({
             case "user":
               return (
                 <Box key={item.id} marginTop={1}>
-                  <Text color={theme.accent}>{"▸ "}</Text>
+                  <Text color={activeTheme.accent}>{"▸ "}</Text>
                   <Text>{item.text}</Text>
                 </Box>
               );
@@ -672,17 +792,17 @@ export function App({
               return item.isError ? (
                 <Box key={item.id} flexDirection="column" marginTop={1}>
                   <Text>
-                    <Text color={theme.err}>  ◆ </Text>
-                    <Text color={theme.err}>{TOOL_ICON[item.name] ?? "▸"} </Text>
+                    <Text color={activeTheme.err}>  ◆ </Text>
+                    <Text color={activeTheme.err}>{TOOL_ICON[item.name] ?? "▸"} </Text>
                     <Text bold>{item.name}</Text>
                     <Text dimColor>({item.argsPreview})</Text>
                   </Text>
-                  <Text color={theme.err}>    ⌐ {item.note}</Text>
+                  <Text color={activeTheme.err}>    ⌐ {item.note}</Text>
                 </Box>
               ) : (
                 <Box key={item.id} marginTop={1}>
                   <Text dimColor>  │ </Text>
-                  <Text color={theme.accent}>{TOOL_ICON[item.name] ?? "▸"} </Text>
+                  <Text color={activeTheme.accent}>{TOOL_ICON[item.name] ?? "▸"} </Text>
                   <Text>{item.name}</Text>
                   <Text dimColor>({item.argsPreview}) </Text>
                   <Text dimColor>· {item.note}</Text>
@@ -697,7 +817,7 @@ export function App({
             case "error":
               return (
                 <Box key={item.id} marginTop={1}>
-                  <Text color={theme.err}>✗ {item.text}</Text>
+                  <Text color={activeTheme.err}>✗ {item.text}</Text>
                 </Box>
               );
           }
@@ -715,13 +835,29 @@ export function App({
 
       {!pending ? (
         <Box flexDirection="column" marginTop={1}>
-          <Box borderStyle="round" borderColor={busy ? theme.border : theme.accent} paddingX={1}>
-            <Text color={theme.accent}>{"▸ "}</Text>
+          <Box borderStyle="round" borderColor={busy ? activeTheme.border : activeTheme.accent} paddingX={1}>
+            <Text color={activeTheme.accent}>{"▸ "}</Text>
             {input ? <Text>{input}</Text> : <Text dimColor>{busy ? "type to queue…" : "task, or / for commands"}</Text>}
-            <Text color={theme.accent}>▌</Text>
+            <Text color={activeTheme.accent}>▌</Text>
           </Box>
           {menuVisible ? (
             <CommandMenu items={menuItems} selected={menuSelected} />
+          ) : pickerSessions.length > 0 ? (
+            <Box flexDirection="column" marginLeft={2} marginTop={1}>
+              <Text color={activeTheme.accent} bold>resume session  <Text dimColor>(↑↓ navigate · ↵ select · esc cancel)</Text></Text>
+              {pickerSessions.map((s, i) => {
+                const ago = timeAgo(s.updatedAt);
+                const title = s.title || "(untitled)";
+                const selected = i === pickerSelected;
+                return (
+                  <Text key={s.id}>
+                    <Text color={selected ? activeTheme.accent : "gray"}>{selected ? "▸ " : "  "}</Text>
+                    <Text color={selected ? activeTheme.accent : undefined}>{title}</Text>
+                    <Text dimColor>  {s.messageCount} msgs  {fmtCost(s.totalCost)}  {ago}</Text>
+                  </Text>
+                );
+              })}
+            </Box>
           ) : (
             <StatusBar
               model={agent.model}
@@ -734,6 +870,8 @@ export function App({
               routerOff={!router.enabled}
               effort={(config as any).effort?.level ?? "mid"}
               iterations={turnIterations}
+              planMode={(config as any).planMode ?? false}
+              activeTheme={activeTheme}
             />
           )}
         </Box>

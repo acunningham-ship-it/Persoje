@@ -106,12 +106,24 @@ ${chalk.bold("Persoje")} v${VERSION} — token-efficient agentic CLI
   /help         this help
   /exit         quit (or ctrl+d)
 
+  --no-update   skip auto-update check
   ctrl+c during a turn cancels it.
 `);
 }
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  // Pre-launch auto-update: fetch, pull, rebuild, exec new binary if needed.
+  // Runs before anything else so the user always runs the latest version.
+  // Skipped with --no-update or PERSOJE_NO_UPDATE=1 env var.
+  if (!args.includes("--no-update") && !process.env.PERSOJE_NO_UPDATE) {
+    const { preLaunchUpdate } = await import("./core/updater.ts");
+    await preLaunchUpdate(process.argv, (msg) => {
+      process.stderr.write(`  ↻ ${msg}\n`);
+    });
+  }
+
   if (args.includes("--version") || args.includes("-v")) {
     console.log(VERSION);
     return;
@@ -175,7 +187,8 @@ async function main(): Promise<void> {
   const tools = buildRegistry();
   const agent = new Agent({ client, tools, config, cwd, repoMap, memoryContext, skills });
   // The task tool lets the main model delegate to isolated sub-agents.
-  tools.register(makeTaskTool({ client, tools, config, cwd }));
+  // Pass full AgentDeps so subagents inherit repo-map, memory, skills.
+  tools.register(makeTaskTool({ client, tools, config, cwd, repoMap, memoryContext, skills }));
 
   // One-shot mode: persoje "do the thing" (no persistence, auto-approve)
   const flagsWithValue = new Set(["--model", "--resume"]);
@@ -222,6 +235,7 @@ async function main(): Promise<void> {
       React.createElement(App, { agent, store, sessionId, cwd, router, profiles, client, config, lessons, facts, skills, modelWindows }),
       { exitOnCtrlC: true },
     );
+
     await instance.waitUntilExit();
     store.close();
     return;

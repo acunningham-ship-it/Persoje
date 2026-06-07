@@ -42,7 +42,7 @@ test("list scopes to cwd and tracks usage cost", () => {
   expect(all).toHaveLength(2);
   const scoped = store.list("/proj/a");
   expect(scoped).toHaveLength(1);
-  expect(scoped[0]!.title).toBe("first task");
+  expect(scoped[0]!.title).toBe("first-task");
   expect(scoped[0]!.totalCost).toBeCloseTo(0.005);
   store.close();
 });

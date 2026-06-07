@@ -132,10 +132,17 @@ export class Agent {
 
         // Effort-aware system prompt
         const effort = (config as any).effort?.level ?? "mid";
+        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort);
+        // Use cache-optimized build when prompt caching is enabled — inserts
+        // cache_control breakpoints at stable turn boundaries for maximum
+        // cache hit rate on OpenRouter/Anthropic (50% cost on cached tokens).
+        const messages = config.context.cacheSystemPrompt
+          ? this.context.buildWithCacheBreakpoints(systemPrompt)
+          : this.context.build(systemPrompt);
         const stream = client.stream({
           model: config.model.primary,
           fallbackModels: config.model.fallbacks,
-          messages: this.context.build(buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort)),
+          messages,
           tools: tools.schemas(),
           temperature: config.model.temperature,
           cacheSystemPrompt: config.context.cacheSystemPrompt,

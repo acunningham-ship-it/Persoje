@@ -9,14 +9,17 @@ import { OpenRouterClient } from "../models/openrouter.ts";
 
 export interface SubAgentSpec {
   task: string;
-  /** Tool names allowed (read-only default: read, grep, glob, ls). */
+  /** Tool names allowed. Default: read + grep + glob + ls (read-only).
+   *  For mutating subagents, include write/edit/bash as needed. */
   tools?: string[];
   /** Model to use (defaults to parent config.model.primary). */
   model?: string;
   /** Max iterations for the sub-agent (defaults to 10). */
   maxIterations?: number;
-  /** Token budget for summary truncation (defaults to 500). */
+  /** Token budget for summary truncation (defaults to 800). */
   summaryMaxTokens?: number;
+  /** Context budget for the sub-agent (defaults to 40,000). */
+  contextBudget?: number;
 }
 
 export interface SubAgentResult {
@@ -32,33 +35,44 @@ export interface SubAgentResult {
 /**
  * Run an isolated child Agent on a task with limited tools and no transcript leakage.
  * Returns only a capped summary + usage metrics.
+ *
+ * Fixes vs v1:
+ * - Child inherits parent's repoMap + memoryContext so it knows the project
+ * - Larger default context budget (40k vs 20k)
+ * - Captures ALL text output, not just the last text-end event
+ * - If the agent hits max-iterations without a final text, synthesizes a summary
+ *   from the tool calls it made
  */
 export async function runSubAgent(
   spec: SubAgentSpec,
-  parent: {
-    client: OpenRouterClient;
-    tools: ToolRegistry;
-    config: PersojeConfig;
-    cwd: string;
-  },
+  parent: AgentDeps & { cwd: string },
   signal?: AbortSignal,
 ): Promise<SubAgentResult> {
   // Clone parent config via JSON round-trip; override model and budget.
   const childConfig = JSON.parse(JSON.stringify(parent.config));
   childConfig.model.primary = spec.model ?? parent.config.model.primary;
   childConfig.loop.maxIterations = spec.maxIterations ?? 10;
-  childConfig.context.budgetTokens = Math.min(parent.config.context.budgetTokens, 20_000);
+  childConfig.context.budgetTokens = Math.min(
+    spec.contextBudget ?? 40_000,
+    parent.config.context.budgetTokens,
+  );
 
   // Subset tools: read-only default is [read, grep, glob, ls].
   const allowedTools = spec.tools ?? ["read", "grep", "glob", "ls"];
   const childRegistry = parent.tools.subset(allowedTools);
 
-  // Build child agent without approval hook (subset is read-only by default).
+  // Build child agent — inherit repoMap + memoryContext from parent so the
+  // subagent knows what project it's working in.
   const child = new Agent({
     client: parent.client,
     tools: childRegistry,
     config: childConfig,
     cwd: parent.cwd,
+    repoMap: parent.repoMap,
+    memoryContext: parent.memoryContext,
+    skills: parent.skills,
+    // No approval hook — subagents are isolated and auto-approved
+    // (the parent already decided to delegate).
   });
 
   // Run the child with task prompt + isolation directive.
@@ -66,23 +80,42 @@ export async function runSubAgent(
     spec.task +
     "\n\nYou are a sub-agent. Work autonomously; your final text reply is returned to the caller — make it a dense, self-contained summary (no questions).";
 
-  let finalText = "";
+  let allText = "";
+  let lastText = "";
   let usage = { inputTokens: 0, outputTokens: 0, cost: 0, calls: 0 };
+  let toolCallLog: string[] = [];
+  let endReason = "";
 
   for await (const ev of child.run(taskPrompt, signal)) {
-    if (ev.type === "text-end") {
-      finalText = ev.text;
+    if (ev.type === "text-delta") {
+      // Stream text as it comes — accumulate for the summary
+    } else if (ev.type === "text-end") {
+      lastText = ev.text;
+      allText += (allText ? "\n" : "") + ev.text;
     } else if (ev.type === "usage") {
       usage.inputTokens += ev.usage.inputTokens;
       usage.outputTokens += ev.usage.outputTokens;
       usage.cost += ev.usage.cost;
       usage.calls++;
+    } else if (ev.type === "tool-start") {
+      toolCallLog.push(`${ev.name}(${JSON.stringify(ev.args).slice(0, 100)})`);
+    } else if (ev.type === "turn-end") {
+      endReason = ev.reason;
     }
   }
 
+  // If the agent produced text, use it. Otherwise synthesize from tool calls.
+  let summary = allText || lastText;
+  if (!summary && toolCallLog.length > 0) {
+    summary = `Sub-agent completed (${endReason}) after ${toolCallLog.length} tool calls:\n` +
+      toolCallLog.map((l, i) => `${i + 1}. ${l}`).join("\n");
+  } else if (!summary) {
+    summary = `Sub-agent completed (${endReason}) with no output.`;
+  }
+
   // Truncate summary to budget.
-  const summaryMaxTokens = spec.summaryMaxTokens ?? 500;
-  const { text: truncatedSummary } = truncate(finalText, summaryMaxTokens);
+  const summaryMaxTokens = spec.summaryMaxTokens ?? 800;
+  const { text: truncatedSummary } = truncate(summary, summaryMaxTokens);
 
   return {
     summary: truncatedSummary,
@@ -126,13 +159,11 @@ function getSharedPool(): SubAgentPool {
 /**
  * Export a "task" Tool that the main agent can call to spawn sub-agents.
  * Returns summary + usage footer.
+ *
+ * The `parent` arg now takes full AgentDeps so the subagent inherits
+ * repo-map, memory context, and skills from the parent.
  */
-export function makeTaskTool(parent: {
-  client: OpenRouterClient;
-  tools: ToolRegistry;
-  config: PersojeConfig;
-  cwd: string;
-}): Tool {
+export function makeTaskTool(parent: AgentDeps & { cwd: string }): Tool {
   return {
     name: "task",
     description:
@@ -141,12 +172,12 @@ export function makeTaskTool(parent: {
       task: z.string().describe("What to do and what to return"),
       tools: z.array(z.string()).optional().describe("Allowed tool names (default: read-only)"),
     }),
-    maxResultTokens: 600,
+    maxResultTokens: 1000,
     async execute({ task, tools }, _ctx) {
       const pool = getSharedPool();
       const result = await pool.run(() =>
         runSubAgent(
-          { task, tools, summaryMaxTokens: 600 },
+          { task, tools, summaryMaxTokens: 1000 },
           parent,
         ),
       );
