@@ -73,6 +73,68 @@ export function Spinner({ detail, startedAt }: { detail?: string; startedAt: num
   );
 }
 
+const fmtTok = (n: number): string => (n >= 1000 ? (n / 1000).toFixed(1) + "K" : String(n));
+const fmtSecs = (s: number): string => (s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s` : `${s}s`);
+
+/**
+ * The hermes-style bottom gauge — and persoje's whole thesis made visible:
+ * a live context meter showing how lean the session is staying.
+ */
+export function StatusBar({
+  model,
+  ctxUsed,
+  ctxBudget,
+  cost,
+  busy,
+  turnStart,
+  queued,
+  routerOff,
+}: {
+  model: string;
+  ctxUsed: number;
+  ctxBudget: number;
+  cost: number;
+  busy: boolean;
+  turnStart: number;
+  queued: number;
+  routerOff: boolean;
+}): React.ReactElement {
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (!busy) return;
+    const t = setInterval(() => force((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [busy]);
+
+  const pct = Math.min(100, Math.round((ctxUsed / ctxBudget) * 100));
+  const filled = Math.min(10, Math.round(pct / 10));
+  const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+  const barColor = pct < 50 ? theme.ok : pct < 80 ? theme.warn : theme.err;
+  const sep = <Text dimColor> │ </Text>;
+
+  return (
+    <Box paddingX={1}>
+      <Text color={theme.accent}>⬡ </Text>
+      <Text dimColor>{model}</Text>
+      {sep}
+      <Text dimColor>
+        {fmtTok(ctxUsed)}/{fmtTok(ctxBudget)} </Text>
+      <Text color={barColor}>[{bar}]</Text>
+      <Text dimColor> {pct}%</Text>
+      {sep}
+      <Text dimColor>${cost < 0.01 ? cost.toFixed(5) : cost.toFixed(3)}</Text>
+      {busy ? (
+        <>
+          {sep}
+          <Text color={theme.accent}>⏱ {fmtSecs(Math.floor((Date.now() - turnStart) / 1000))}</Text>
+        </>
+      ) : null}
+      {queued ? <Text dimColor> · {queued} queued</Text> : null}
+      {routerOff ? <Text dimColor> · router off</Text> : null}
+    </Box>
+  );
+}
+
 export function CommandMenu({
   items,
   selected,

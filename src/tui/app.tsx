@@ -13,8 +13,20 @@ import type { SkillLibrary } from "../memory/skills.ts";
 import { runCanary, qualityFromScore } from "../router/canary.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { COMMANDS, filterCommands, helpText } from "./commands.ts";
-import { Banner, Spinner, CommandMenu, ApprovalPrompt } from "./components.tsx";
+import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar } from "./components.tsx";
 import { theme } from "./theme.ts";
+
+/** Single-width glyphs per tool so the ⏺ lines scan like hermes without emoji-width drift. */
+const TOOL_ICON: Record<string, string> = {
+  read: "◇",
+  write: "✎",
+  edit: "✎",
+  bash: "$",
+  grep: "⌕",
+  glob: "⌕",
+  ls: "▸",
+  task: "⚙",
+};
 
 const VERSION = "0.1.0";
 const HISTORY_PATH = join(homedir(), ".config", "persoje", "history.json");
@@ -613,7 +625,7 @@ export function App({
             case "user":
               return (
                 <Box key={item.id} marginTop={1}>
-                  <Text color={theme.accent}>{"› "}</Text>
+                  <Text color={theme.accent}>{"❯ "}</Text>
                   <Text>{item.text}</Text>
                 </Box>
               );
@@ -630,7 +642,7 @@ export function App({
               return (
                 <Box key={item.id} flexDirection="column" marginTop={1}>
                   <Text>
-                    <Text color={theme.bullet}>⏺ </Text>
+                    <Text color={item.isError ? theme.err : theme.accent}>{TOOL_ICON[item.name] ?? "⏺"} </Text>
                     <Text bold>{item.name}</Text>
                     <Text dimColor>({item.argsPreview})</Text>
                   </Text>
@@ -668,20 +680,23 @@ export function App({
       {!pending ? (
         <Box flexDirection="column" marginTop={1}>
           <Box borderStyle="round" borderColor={busy ? theme.border : theme.accent} paddingX={1}>
-            <Text color={theme.accent}>{"› "}</Text>
+            <Text color={theme.accent}>{"❯ "}</Text>
             {input ? <Text>{input}</Text> : <Text dimColor>{busy ? "type to queue…" : "task, or / for commands"}</Text>}
             <Text color={theme.accent}>▌</Text>
           </Box>
           {menuVisible ? (
             <CommandMenu items={menuItems} selected={menuSelected} />
           ) : (
-            <Box paddingX={1}>
-              <Text dimColor>
-                {agent.model} · ~{agent.context.estimateTokensUsed()} tok · {fmtCost(statusCost)}
-                {router.enabled ? "" : " · router off"}
-                {queue.length ? ` · ${queue.length} queued` : ""}
-              </Text>
-            </Box>
+            <StatusBar
+              model={agent.model}
+              ctxUsed={agent.context.estimateTokensUsed()}
+              ctxBudget={config.context.budgetTokens}
+              cost={statusCost}
+              busy={busy}
+              turnStart={busyStart}
+              queued={queue.length}
+              routerOff={!router.enabled}
+            />
           )}
         </Box>
       ) : null}
