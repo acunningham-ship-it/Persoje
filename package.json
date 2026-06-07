@@ -1,0 +1,23 @@
+{
+  "name": "persoje",
+  "version": "0.1.0",
+  "description": "Token-efficient agentic coding CLI for OpenRouter — lean harness, smart routing, weak-model guardrails",
+  "type": "module",
+  "private": true,
+  "bin": { "persoje": "src/cli.ts" },
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "test": "bun test",
+    "compile": "bun build --compile --minify --outfile dist/persoje src/cli.ts"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
