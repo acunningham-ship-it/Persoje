@@ -69,6 +69,22 @@ export class OpenRouterClient {
     private baseUrl = "https://openrouter.ai/api/v1",
   ) {}
 
+  /** Fetch the model catalog → id ⇒ real context-window size (for the status gauge). */
+  async modelContextWindows(): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    try {
+      const res = await fetch(`${this.baseUrl}/models`, {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+      });
+      if (!res.ok) return map;
+      const data = (await res.json()) as { data?: Array<{ id: string; context_length?: number }> };
+      for (const m of data.data ?? []) if (m.context_length) map.set(m.id, m.context_length);
+    } catch {
+      // offline / rate-limited — gauge falls back to the compaction budget
+    }
+    return map;
+  }
+
   /**
    * Stream a chat completion. Yields text deltas as they arrive, accumulated tool
    * calls once complete, and a final usage report with real cost from OpenRouter.

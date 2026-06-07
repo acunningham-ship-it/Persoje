@@ -120,7 +120,12 @@ export function AssistantBlock({ body }: { body: React.ReactNode }): React.React
   );
 }
 
-const fmtTok = (n: number): string => (n >= 1000 ? (n / 1000).toFixed(1) + "K" : String(n));
+const fmtTok = (n: number): string =>
+  n >= 1_000_000
+    ? (n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1).replace(/\.0$/, "") + "M"
+    : n >= 1000
+      ? (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1).replace(/\.0$/, "") + "K"
+      : String(n);
 const fmtSecs = (s: number): string => (s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s` : `${s}s`);
 
 /**

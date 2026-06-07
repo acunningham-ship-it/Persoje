@@ -204,6 +204,9 @@ async function main(): Promise<void> {
     agent.context.onAppend = (msg) => store.appendMessage(sessionId, msg);
     agent.context.onCompact = (messages) => store.replaceMessages(sessionId, messages);
 
+    // Real context windows for the status gauge (owl-alpha = 1M, not the 40k compaction budget).
+    const modelWindows = await client.modelContextWindows();
+
     const profiles = new ProfileStore();
     const router = new Router({
       enabled: config.router.enabled,
@@ -216,7 +219,7 @@ async function main(): Promise<void> {
     const React = await import("react");
     const { App } = await import("./tui/app.tsx");
     const instance = render(
-      React.createElement(App, { agent, store, sessionId, cwd, router, profiles, client, config, lessons, facts, skills }),
+      React.createElement(App, { agent, store, sessionId, cwd, router, profiles, client, config, lessons, facts, skills, modelWindows }),
       { exitOnCtrlC: true },
     );
     await instance.waitUntilExit();

@@ -59,6 +59,8 @@ export interface AppProps {
   lessons: LessonLog;
   facts: FactStore;
   skills: SkillLibrary;
+  /** model id → real context-window size, for the status gauge. */
+  modelWindows: Map<string, number>;
 }
 
 function fmtCost(cost: number): string {
@@ -106,6 +108,7 @@ export function App({
   lessons,
   facts,
   skills,
+  modelWindows,
 }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const [sessionId, setSessionId] = useState(initialSession);
@@ -691,7 +694,7 @@ export function App({
             <StatusBar
               model={agent.model}
               ctxUsed={agent.context.estimateTokensUsed()}
-              ctxBudget={config.context.budgetTokens}
+              ctxBudget={modelWindows.get(agent.model) ?? config.context.budgetTokens}
               cost={statusCost}
               busy={busy}
               turnStart={busyStart}
