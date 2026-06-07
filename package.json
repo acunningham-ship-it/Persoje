@@ -17,6 +17,7 @@
     "ink": "^7.0.5",
     "marked": "^18.0.5",
     "marked-terminal": "^7.3.0",
+    "minisearch": "^7.2.0",
     "react": "^19.2.7",
     "zod": "^4"
   },
