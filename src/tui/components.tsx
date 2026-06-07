@@ -4,7 +4,6 @@ import type { CommandMeta } from "./commands.ts";
 import { theme } from "./theme.ts";
 
 // Dependency-free gradient: interpolate per-character between two hex stops.
-// (ink-gradient pulls in chroma/tinygradient — not worth the bundle for one word.)
 function gradient(text: string, from: [number, number, number], to: [number, number, number]): React.ReactElement[] {
   const n = text.length;
   const hex = (c: number) => c.toString(16).padStart(2, "0");
@@ -26,62 +25,61 @@ export function Banner({
   model,
   cwd,
   routerState,
+  effort,
 }: {
   version: string;
   model: string;
   cwd: string;
   routerState: string;
+  effort?: string;
 }): React.ReactElement {
-  // Short home-relative cwd to keep the line tight.
   const home = process.env.HOME ?? "";
   const shortCwd = home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
+  const effortLabel = effort ? ` · effort ${effort}` : "";
   return (
     <Box flexDirection="column" marginBottom={1}>
-      {/* Contained welcome box — hugs content (alignSelf), not full terminal width. */}
       <Box
         borderStyle="round"
-        borderColor={theme.border}
+        borderColor={theme.accent2}
         paddingX={1}
         flexDirection="column"
         alignSelf="flex-start"
       >
         <Text>
-          <Text color={theme.accent} bold>
-            ✻{" "}
-          </Text>
-          {gradient("persoje", [250, 121, 33], [255, 207, 107])}
+          {gradient("◆ persoje", [232, 163, 23], [199, 139, 13])}
           <Text dimColor> v{version}</Text>
         </Text>
         <Box marginTop={1}>
-          <Text dimColor>/help for commands · / for the menu · esc interrupts</Text>
+          <Text dimColor>model </Text>
+          <Text color={theme.accent}>{model}</Text>
+          <Text dimColor> · cwd </Text>
+          <Text color={theme.accent}>{shortCwd}</Text>
+          <Text dimColor> · router {routerState}{effortLabel}</Text>
         </Box>
-        <Text dimColor>
-          {"  "}model {model}
-        </Text>
-        <Text dimColor>
-          {"  "}cwd {shortCwd} · router {routerState}
-        </Text>
-      </Box>
-      <Box marginTop={1} marginLeft={1}>
-        <Text color={theme.accent}>★ </Text>
-        <Text dimColor>token-efficient — every model runs lean here. Try a task, or /init this project.</Text>
+        <Text dimColor>/help · / for menu · esc interrupts · /effort low|mid|high|max</Text>
       </Box>
     </Box>
   );
 }
 
-// Cycling verbs give the wait some personality without a token ticker fighting for space.
-const VERBS = ["Thinking", "Working", "Pondering", "Crunching", "Reasoning", "Brewing"];
-const FRAMES = ["·", "✢", "✳", "✶", "✳", "✢"];
+// Effort-aware verbs — they reflect how hard the agent is working
+const VERBS_BY_EFFORT = {
+  low:  ["Thinking", "Quick check", "Scanning"],
+  mid:  ["Working", "Thinking", "Crunching", "Reasoning"],
+  high: ["Analyzing", "Investigating", "Reasoning deeply", "Exploring"],
+  max:  ["Deep analysis", "Exhaustive search", "Full investigation", "Considering all paths"],
+};
+const FRAMES = ["◆", "◇", "◈", "◇", "◆", "⬡"];
 
-export function Spinner({ detail, startedAt }: { detail?: string; startedAt: number }): React.ReactElement {
+export function Spinner({ detail, startedAt, effort }: { detail?: string; startedAt: number; effort?: string }): React.ReactElement {
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 130);
     return () => clearInterval(t);
   }, []);
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-  const verb = VERBS[Math.floor(elapsed / 4) % VERBS.length];
+  const verbs = VERBS_BY_EFFORT[(effort as keyof typeof VERBS_BY_EFFORT) ?? "mid"] ?? VERBS_BY_EFFORT.mid;
+  const verb = verbs[Math.floor(elapsed / 4) % verbs.length];
   return (
     <Box marginTop={1}>
       <Text color={theme.accent}>{FRAMES[tick % FRAMES.length]} </Text>
@@ -96,26 +94,24 @@ function termWidth(): number {
 }
 
 /**
- * Hermes-style titled message block: a top rule carrying the speaker's name,
- * indented content, and a bottom rule. No side bars — so rendered markdown
- * (code blocks especially) wraps naturally instead of fighting a border.
+ * Persoje's response block — clean, scannable, own identity.
+ * Top rule with ◆ marker, indented body, bottom rule.
  */
 export function AssistantBlock({ body }: { body: React.ReactNode }): React.ReactElement {
   const width = termWidth();
-  const head = "╭─ ✦ persoje ";
-  const topFill = "─".repeat(Math.max(0, width - head.length - 1));
+  const head = "── ◆ ";
+  const topFill = "─".repeat(Math.max(0, width - head.length - 10));
   const bottom = "─".repeat(Math.max(0, width - 2));
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text>
-        <Text dimColor>╭─ </Text>
-        <Text color={theme.accent}>✦ persoje </Text>
-        <Text dimColor>{topFill}╮</Text>
+        <Text color={theme.accent}>── ◆ </Text>
+        <Text dimColor>{topFill}</Text>
       </Text>
       <Box marginLeft={2} flexDirection="column">
         {body}
       </Box>
-      <Text dimColor>╰{bottom}╯</Text>
+      <Text dimColor>──{bottom}</Text>
     </Box>
   );
 }
@@ -129,8 +125,8 @@ const fmtTok = (n: number): string =>
 const fmtSecs = (s: number): string => (s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s` : `${s}s`);
 
 /**
- * The hermes-style bottom gauge — and persoje's whole thesis made visible:
- * a live context meter showing how lean the session is staying.
+ * Dashboard-style status bar — Persoje's thesis made visible:
+ * context meter, cost, effort, time, queue depth.
  */
 export function StatusBar({
   model,
@@ -141,6 +137,8 @@ export function StatusBar({
   turnStart,
   queued,
   routerOff,
+  effort,
+  iterations,
 }: {
   model: string;
   ctxUsed: number;
@@ -150,6 +148,8 @@ export function StatusBar({
   turnStart: number;
   queued: number;
   routerOff: boolean;
+  effort?: string;
+  iterations?: number;
 }): React.ReactElement {
   const [, force] = useState(0);
   useEffect(() => {
@@ -164,21 +164,29 @@ export function StatusBar({
   const barColor = pct < 50 ? theme.ok : pct < 80 ? theme.warn : theme.err;
   const sep = <Text dimColor> │ </Text>;
 
+  const effortColors: Record<string, string> = { low: theme.dim, mid: theme.accent, high: theme.warn, max: theme.err };
+
   return (
     <Box paddingX={1}>
       <Text color={theme.accent}>⬡ </Text>
       <Text dimColor>{model}</Text>
       {sep}
-      <Text dimColor>
-        {fmtTok(ctxUsed)}/{fmtTok(ctxBudget)} </Text>
+      <Text dimColor>{fmtTok(ctxUsed)}/{fmtTok(ctxBudget)} </Text>
       <Text color={barColor}>[{bar}]</Text>
       <Text dimColor> {pct}%</Text>
       {sep}
       <Text dimColor>${cost < 0.01 ? cost.toFixed(5) : cost.toFixed(3)}</Text>
+      {effort ? (
+        <>
+          {sep}
+          <Text color={effortColors[effort] ?? theme.accent}>▸ {effort}</Text>
+        </>
+      ) : null}
       {busy ? (
         <>
           {sep}
           <Text color={theme.accent}>⏱ {fmtSecs(Math.floor((Date.now() - turnStart) / 1000))}</Text>
+          {iterations != null && iterations > 0 ? <Text dimColor> · iter {iterations}</Text> : null}
         </>
       ) : null}
       {queued ? <Text dimColor> · {queued} queued</Text> : null}
@@ -199,7 +207,7 @@ export function CommandMenu({
     <Box flexDirection="column" marginLeft={2}>
       {items.slice(0, 8).map((c, i) => (
         <Text key={c.name}>
-          <Text color={i === selected ? theme.accent : "gray"}>{i === selected ? "❯ " : "  "}</Text>
+          <Text color={i === selected ? theme.accent : "gray"}>{i === selected ? "▸ " : "  "}</Text>
           <Text color={i === selected ? theme.accent : undefined}>{c.name.padEnd(width)}</Text>
           <Text dimColor> {c.args ? c.args + "  " : ""}{c.desc}</Text>
         </Text>
@@ -208,7 +216,7 @@ export function CommandMenu({
   );
 }
 
-/** Render an approval request with tool-appropriate detail: diffs for edits, the command for bash. */
+/** Render an approval request with tool-appropriate detail. */
 export function ApprovalPrompt({
   name,
   args,
@@ -261,7 +269,7 @@ export function ApprovalPrompt({
   return (
     <Box borderStyle="round" borderColor={theme.warn} paddingX={1} flexDirection="column" marginTop={1}>
       <Text color={theme.warn} bold>
-        {name}
+        ◆ {name}
       </Text>
       {body}
       <Box marginTop={1}>

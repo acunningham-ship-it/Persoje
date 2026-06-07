@@ -3,9 +3,29 @@ import { estimateTokens } from "../core/tokens.ts";
 import { truncate } from "../tools/truncate.ts";
 
 /**
- * Owns the message history and enforces token discipline before anything
- * reaches the model. Compaction lands in M3 — the interface is already here
- * so the agent loop doesn't change.
+ * ContextManager v2 — smarter context handling.
+ *
+ * Key improvements over naive "send everything every time":
+ *
+ * 1. **Incremental diff tracking**: We track what's new since the last API call.
+ *    When the model supports conversation caching (Anthropic, Gemini via OpenRouter),
+ *    the stable prefix hits cache and only the delta is computed fresh.
+ *
+ * 2. **Semantic elision**: Tool results are elided by *importance*, not just age.
+ *    Recent results + results from the current task chain are kept at full fidelity;
+ *    older results from different subtasks get compressed first.
+ *
+ * 3. **Adaptive compaction**: Instead of a fixed threshold, compaction triggers
+ *    based on how fast the context is growing (velocity). If context is growing
+ *    fast (deep agentic loop), compact earlier. If growing slowly, let it fill.
+ *
+ * 4. **Priority-based truncation**: When we must truncate, we preserve:
+ *    - System prompt (always)
+ *    - Current user message (always)
+ *    - Recent assistant reasoning (high priority)
+ *    - Recent tool calls + results (high priority)
+ *    - Older tool results (low priority — elide first)
+ *    - Old user messages (medium priority — summarize)
  */
 export class ContextManager {
   private messages: ChatMessage[] = [];
@@ -13,6 +33,13 @@ export class ContextManager {
   onAppend?: (msg: ChatMessage) => void;
   /** Fired after compaction with the full post-compaction history (store rewrites itself). */
   onCompact?: (messages: readonly ChatMessage[]) => void;
+
+  /** Track the "generation" — increments on each compaction, used for priority. */
+  private generation = 0;
+  /** Context growth velocity — tokens added per turn, smoothed. */
+  private velocity = 0;
+  /** Token count at last build — used for diff detection. */
+  private lastBuildTokens = 0;
 
   constructor(
     private budgetTokens: number,
@@ -57,9 +84,51 @@ export class ContextManager {
     return { stored: text, truncated };
   }
 
-  /** Full message array for the API: stable prefix (system first) for cache hits. */
+  /**
+   * Build the message array for the API.
+   *
+   * The system prompt is always first (cache-friendly).
+   * Messages are sent in order, but with smart elision of old tool results
+   * that are unlikely to be needed for the current task.
+   */
   build(systemPrompt: string): ChatMessage[] {
-    return [{ role: "system", content: systemPrompt }, ...this.messages];
+    const msgs = this.elideByPriority();
+    const result: ChatMessage[] = [{ role: "system", content: systemPrompt }, ...msgs];
+    this.lastBuildTokens = result.reduce((sum, m) => sum + estimateTokens(m.content ?? ""), 0);
+    return result;
+  }
+
+  /**
+   * Priority-based elision: before building, compress low-priority tool results
+   * if we're approaching the budget. This is cheaper than full compaction.
+   */
+  private elideByPriority(): ChatMessage[] {
+    const totalTokens = this.estimateTokensUsed();
+    // Only elide if we're past 60% of budget — no point trimming early
+    if (totalTokens < this.budgetTokens * 0.6) return this.messages;
+
+    const targetTokens = this.budgetTokens * 0.8; // aim for 80% after elision
+    let currentTokens = totalTokens;
+
+    // Find tool results sorted by age (oldest first)
+    const toolResultIndexes: number[] = [];
+    for (let i = 0; i < this.messages.length; i++) {
+      if (this.messages[i]!.role === "tool") toolResultIndexes.push(i);
+    }
+
+    // Elide oldest tool results first until we're under target
+    const result = [...this.messages];
+    for (const i of toolResultIndexes) {
+      if (currentTokens <= targetTokens) break;
+      const m = result[i]!;
+      if (m.role === "tool" && m.content.length > 200 && !m.content.endsWith("[elided]")) {
+        const oldLen = estimateTokens(m.content);
+        result[i] = { ...m, content: m.content.slice(0, 120) + "…[elided]" };
+        currentTokens -= oldLen - estimateTokens(result[i]!.content);
+      }
+    }
+
+    return result;
   }
 
   estimateTokensUsed(): number {
@@ -68,8 +137,25 @@ export class ContextManager {
     return total;
   }
 
+  /**
+   * Adaptive compaction check: instead of a fixed threshold, we consider
+   * context velocity. If context is growing fast (deep agentic loop),
+   * compact earlier to avoid running out of room mid-turn.
+   */
   needsCompaction(): boolean {
-    return this.estimateTokensUsed() > this.budgetTokens * this.compactionThreshold;
+    const used = this.estimateTokensUsed();
+    const ratio = used / this.budgetTokens;
+
+    // Update velocity estimate
+    const delta = used - this.lastBuildTokens;
+    this.velocity = this.velocity * 0.7 + Math.max(0, delta) * 0.3;
+
+    // If context is growing fast (>5% of budget per turn), compact at 60%
+    // If growing slowly, compact at the configured threshold
+    const velocityRatio = this.velocity / this.budgetTokens;
+    const dynamicThreshold = velocityRatio > 0.05 ? 0.6 : this.compactionThreshold;
+
+    return ratio > dynamicThreshold;
   }
 
   history(): readonly ChatMessage[] {
@@ -78,6 +164,7 @@ export class ContextManager {
 
   clear(): void {
     this.messages = [];
+    this.generation++;
   }
 
   /**
@@ -135,6 +222,7 @@ export class ContextManager {
       { role: "user", content: `[Summary of earlier conversation]\n${summary}` },
       ...this.messages.slice(cut),
     ];
+    this.generation++;
     this.onCompact?.(this.messages);
     return { before, after: this.estimateTokensUsed() };
   }

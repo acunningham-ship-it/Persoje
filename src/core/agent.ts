@@ -111,8 +111,9 @@ export class Agent {
 
     let iterations = 0;
     const loops = new LoopDetector();
+    const maxIter = config.loop.maxIterations; // 0 = unlimited
     try {
-      while (iterations < config.loop.maxIterations) {
+      while (maxIter === 0 || iterations < maxIter) {
         if (signal?.aborted) {
           yield { type: "turn-end", reason: "cancelled", iterations };
           return;
@@ -129,10 +130,12 @@ export class Agent {
         let text = "";
         let toolCalls: ToolCallRequest[] = [];
 
+        // Effort-aware system prompt
+        const effort = (config as any).effort?.level ?? "mid";
         const stream = client.stream({
           model: config.model.primary,
           fallbackModels: config.model.fallbacks,
-          messages: this.context.build(buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext)),
+          messages: this.context.build(buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort)),
           tools: tools.schemas(),
           temperature: config.model.temperature,
           cacheSystemPrompt: config.context.cacheSystemPrompt,
@@ -194,6 +197,7 @@ export class Agent {
           yield* this.executeToolCall(call, signal);
         }
       }
+      // Only reached if maxIter > 0 and we hit it
       yield { type: "turn-end", reason: "max-iterations", iterations };
     } catch (e) {
       if ((e as Error).name === "AbortError") {

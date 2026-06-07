@@ -30,10 +30,16 @@ const ConfigSchema = z.object({
     .prefault({}),
   loop: z
     .object({
-      /** Max model-call iterations per user turn. */
-      maxIterations: z.number().default(20),
+      /** Max model-call iterations per user turn. 0 = unlimited (work until done, loop guard stops repeats). */
+      maxIterations: z.number().default(0),
       /** Bash tool timeout in ms. */
       bashTimeoutMs: z.number().default(60_000),
+    })
+    .prefault({}),
+  effort: z
+    .object({
+      /** Current effort level: low | mid | high | max */
+      level: z.enum(["low", "mid", "high", "max"]).default("mid"),
     })
     .prefault({}),
   /** Per-tool result caps in tokens (overrides tool defaults). */

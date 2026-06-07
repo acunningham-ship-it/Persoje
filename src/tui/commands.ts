@@ -24,6 +24,9 @@ export const COMMANDS: CommandMeta[] = [
   { name: "/quirks", desc: "known quirks of the current model" },
   { name: "/repomap", desc: "show the repo-map being sent to the model" },
   { name: "/dream", desc: "consolidate recent sessions into memory (free model)" },
+  { name: "/effort", args: "low|mid|high|max", desc: "set thinking effort (depth, thoroughness)" },
+  { name: "/autonomous", args: "on|off|status", desc: "toggle persistent mode (survives disconnect)" },
+  { name: "/permsoff", desc: "auto-approve all tool calls (no confirmation)" },
   { name: "/help", desc: "all commands" },
   { name: "/exit", desc: "quit" },
 ];

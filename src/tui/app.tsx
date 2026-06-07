@@ -16,16 +16,16 @@ import { COMMANDS, filterCommands, helpText } from "./commands.ts";
 import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar, AssistantBlock } from "./components.tsx";
 import { theme } from "./theme.ts";
 
-/** Single-width glyphs per tool so the ⏺ lines scan like hermes without emoji-width drift. */
+/** Single-width glyphs per tool — Persoje's geometric style. */
 const TOOL_ICON: Record<string, string> = {
   read: "◇",
   write: "✎",
   edit: "✎",
-  bash: "$",
+  bash: "▸",
   grep: "⌕",
   glob: "⌕",
   ls: "▸",
-  task: "⚙",
+  task: "◆",
 };
 
 const VERSION = "0.1.0";
@@ -124,6 +124,7 @@ export function App({
   const [menuSelected, setMenuSelected] = useState(0);
   const [queue, setQueue] = useState<string[]>([]);
   const [statusCost, setStatusCost] = useState(0);
+  const [turnIterations, setTurnIterations] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const alwaysAllow = useRef(new Set<string>());
   const streamBuf = useRef("");
@@ -241,6 +242,7 @@ export function App({
               const preview = compactArgs(ev.name, ev.args);
               toolArgs.current.set(ev.id, preview);
               setBusyLabel(`${ev.name}(${preview})`);
+              setTurnIterations((n) => n + 1);
               break;
             }
             case "tool-result": {
@@ -276,6 +278,7 @@ export function App({
             case "turn-end":
               if (ev.reason === "max-iterations") push({ kind: "info", text: `stopped after ${ev.iterations} iterations` });
               if (ev.reason === "cancelled") push({ kind: "info", text: "turn cancelled" });
+              setTurnIterations(0);
               // Failed turns become lessons; `persoje dream` curates them later.
               if (ev.reason === "max-iterations" || ev.reason === "error") {
                 lessons.append({
@@ -486,6 +489,35 @@ export function App({
             .finally(() => setBusy(false));
           break;
         }
+        case "/permsoff": {
+          // Auto-approve all tools — no confirmation prompts
+          for (const t of ["read", "write", "edit", "bash", "grep", "glob", "ls", "task"]) {
+            alwaysAllow.current.add(t);
+          }
+          push({ kind: "info", text: "🔓 all tools auto-approved — no confirmation prompts. Use /permissions clear to re-enable." });
+          break;
+        }
+        case "/effort": {
+          const level = rest[0];
+          if (!level || !["low", "mid", "high", "max"].includes(level)) {
+            push({ kind: "info", text: `effort: ${(config as any).effort?.level ?? "mid"} — usage: /effort low|mid|high|max\n  low  = quick answers, minimal verification\n  mid  = balanced (default)\n  high = thorough, verify everything\n  max  = exhaustive, full analysis` });
+            break;
+          }
+          if (!(config as any).effort) (config as any).effort = {};
+          (config as any).effort.level = level;
+          // Adjust temperature with effort: low=0.1, mid=0.3, high=0.5, max=0.7
+          const temps: Record<string, number> = { low: 0.1, mid: 0.3, high: 0.5, max: 0.7 };
+          config.model.temperature = temps[level] ?? 0.3;
+          push({ kind: "info", text: `▸ effort → ${level} (temperature ${config.model.temperature})` });
+          break;
+        }
+        case "/autonomous": {
+          const sub = rest[0] || "status";
+          void import("../core/autonomous.ts")
+            .then(({ autonomousCmd }) => autonomousCmd(sub, { push, alwaysAllow, exit, agent }))
+            .catch((e) => push({ kind: "error", text: `autonomous: ${(e as Error).message}` }));
+          break;
+        }
         default:
           push({ kind: "info", text: `unknown command ${cmd} — /help` });
       }
@@ -621,6 +653,7 @@ export function App({
                 model={agent.model}
                 cwd={cwd}
                 routerState={`${router.enabled ? "on" : "off"} (${router.mode})`}
+                effort={(config as any).effort?.level ?? "mid"}
               />
             );
           }
@@ -628,29 +661,28 @@ export function App({
             case "user":
               return (
                 <Box key={item.id} marginTop={1}>
-                  <Text color={theme.accent}>{"❯ "}</Text>
+                  <Text color={theme.accent}>{"▸ "}</Text>
                   <Text>{item.text}</Text>
                 </Box>
               );
             case "assistant":
               return <AssistantBlock key={item.id} body={<Text>{renderMarkdown(item.text)}</Text>} />;
             case "tool":
-              // Single dense row (hermes style): bar · icon · name(args) · result.
-              // Errors keep the result on its own ⎿ line where there's room to read.
+              // Dense scannable row: icon · name(args) · result
               return item.isError ? (
                 <Box key={item.id} flexDirection="column" marginTop={1}>
                   <Text>
-                    <Text color={theme.err}>│ </Text>
-                    <Text color={theme.err}>{TOOL_ICON[item.name] ?? "⏺"} </Text>
+                    <Text color={theme.err}>  ◆ </Text>
+                    <Text color={theme.err}>{TOOL_ICON[item.name] ?? "▸"} </Text>
                     <Text bold>{item.name}</Text>
                     <Text dimColor>({item.argsPreview})</Text>
                   </Text>
-                  <Text color={theme.err}>{"  ⎿ "}{item.note}</Text>
+                  <Text color={theme.err}>    ⌐ {item.note}</Text>
                 </Box>
               ) : (
                 <Box key={item.id} marginTop={1}>
-                  <Text dimColor>│ </Text>
-                  <Text color={theme.accent}>{TOOL_ICON[item.name] ?? "⏺"} </Text>
+                  <Text dimColor>  │ </Text>
+                  <Text color={theme.accent}>{TOOL_ICON[item.name] ?? "▸"} </Text>
                   <Text>{item.name}</Text>
                   <Text dimColor>({item.argsPreview}) </Text>
                   <Text dimColor>· {item.note}</Text>
@@ -677,14 +709,14 @@ export function App({
           <Text>{stream}</Text>
         </Box>
       ) : null}
-      {busy ? <Spinner detail={busyLabel === "thinking" ? undefined : busyLabel} startedAt={busyStart} /> : null}
+      {busy ? <Spinner detail={busyLabel === "thinking" ? undefined : busyLabel} startedAt={busyStart} effort={(config as any).effort?.level ?? "mid"} /> : null}
 
       {pending ? <ApprovalPrompt name={pending.name} args={pending.args} /> : null}
 
       {!pending ? (
         <Box flexDirection="column" marginTop={1}>
           <Box borderStyle="round" borderColor={busy ? theme.border : theme.accent} paddingX={1}>
-            <Text color={theme.accent}>{"❯ "}</Text>
+            <Text color={theme.accent}>{"▸ "}</Text>
             {input ? <Text>{input}</Text> : <Text dimColor>{busy ? "type to queue…" : "task, or / for commands"}</Text>}
             <Text color={theme.accent}>▌</Text>
           </Box>
@@ -700,6 +732,8 @@ export function App({
               turnStart={busyStart}
               queued={queue.length}
               routerOff={!router.enabled}
+              effort={(config as any).effort?.level ?? "mid"}
+              iterations={turnIterations}
             />
           )}
         </Box>
