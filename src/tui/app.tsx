@@ -14,6 +14,7 @@ import { runCanary, qualityFromScore } from "../router/canary.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { COMMANDS, filterCommands, helpText } from "./commands.ts";
 import { Banner, Spinner, CommandMenu, ApprovalPrompt } from "./components.tsx";
+import { theme } from "./theme.ts";
 
 const VERSION = "0.1.0";
 const HISTORY_PATH = join(homedir(), ".config", "persoje", "history.json");
@@ -612,26 +613,25 @@ export function App({
             case "user":
               return (
                 <Box key={item.id} marginTop={1}>
-                  <Text color="cyan" bold>
-                    › {item.text}
-                  </Text>
+                  <Text color={theme.accent}>{"› "}</Text>
+                  <Text>{item.text}</Text>
                 </Box>
               );
             case "assistant":
               return (
-                <Box key={item.id} marginTop={1} flexDirection="column">
+                <Box key={item.id} marginTop={1}>
                   <Text>{renderMarkdown(item.text)}</Text>
                 </Box>
               );
             case "tool":
               return (
-                <Box key={item.id} flexDirection="column">
+                <Box key={item.id} flexDirection="column" marginTop={1}>
                   <Text>
-                    <Text color={item.isError ? "red" : "green"}>⏺ </Text>
-                    <Text bold>{item.name}</Text>
+                    <Text color={item.isError ? theme.err : theme.accent}>⏺ </Text>
+                    <Text>{item.name}</Text>
                     <Text dimColor>({item.argsPreview})</Text>
                   </Text>
-                  <Text dimColor={!item.isError} color={item.isError ? "red" : undefined}>
+                  <Text color={item.isError ? theme.err : "gray"}>
                     {"  ⎿ "}
                     {item.note}
                   </Text>
@@ -639,43 +639,49 @@ export function App({
               );
             case "info":
               return (
-                <Text key={item.id} dimColor>
-                  {item.text}
-                </Text>
+                <Box key={item.id} marginTop={1}>
+                  <Text dimColor>{item.text}</Text>
+                </Box>
               );
             case "error":
               return (
-                <Text key={item.id} color="red">
-                  ✗ {item.text}
-                </Text>
+                <Box key={item.id} marginTop={1}>
+                  <Text color={theme.err}>✗ {item.text}</Text>
+                </Box>
               );
           }
         }}
       </Static>
 
-      {stream ? <Text>{stream}</Text> : null}
-      {busy ? <Spinner label={busyLabel} startedAt={busyStart} /> : null}
+      {stream ? (
+        <Box marginTop={1}>
+          <Text>{stream}</Text>
+        </Box>
+      ) : null}
+      {busy ? <Spinner detail={busyLabel === "thinking" ? undefined : busyLabel} startedAt={busyStart} /> : null}
 
       {pending ? <ApprovalPrompt name={pending.name} args={pending.args} /> : null}
 
       {!pending ? (
-        <Box flexDirection="column">
-          <Box borderStyle="round" borderColor={busy ? "gray" : "cyan"} paddingX={1}>
-            <Text color="cyan">› </Text>
-            {input ? <Text>{input}</Text> : <Text dimColor>{busy ? "type to queue a message…" : "task, or / for commands"}</Text>}
-            <Text inverse> </Text>
+        <Box flexDirection="column" marginTop={1}>
+          <Box borderStyle="round" borderColor={busy ? theme.border : theme.accent} paddingX={1}>
+            <Text color={theme.accent}>{"› "}</Text>
+            {input ? <Text>{input}</Text> : <Text dimColor>{busy ? "type to queue…" : "task, or / for commands"}</Text>}
+            <Text color={theme.accent}>▋</Text>
           </Box>
-          {menuVisible ? <CommandMenu items={menuItems} selected={menuSelected} /> : null}
+          {menuVisible ? (
+            <CommandMenu items={menuItems} selected={menuSelected} />
+          ) : (
+            <Box paddingX={1}>
+              <Text dimColor>
+                {agent.model} · ~{agent.context.estimateTokensUsed()} tok · {fmtCost(statusCost)}
+                {router.enabled ? "" : " · router off"}
+                {queue.length ? ` · ${queue.length} queued` : ""}
+              </Text>
+            </Box>
+          )}
         </Box>
       ) : null}
-
-      <Box>
-        <Text dimColor>
-          {agent.model} · {sessionId} · ~{agent.context.estimateTokensUsed()} tok · {fmtCost(statusCost)}
-          {router.enabled ? "" : " · router off"}
-          {queue.length ? ` · ${queue.length} queued` : ""}
-        </Text>
-      </Box>
     </Box>
   );
 }

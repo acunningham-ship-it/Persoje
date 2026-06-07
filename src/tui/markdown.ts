@@ -7,10 +7,12 @@ let configured = false;
 export function renderMarkdown(text: string): string {
   try {
     if (!configured) {
-      marked.use(markedTerminal({ reflowText: false }) as any);
+      marked.use(markedTerminal({ reflowText: false, tab: 2 }) as any);
       configured = true;
     }
-    return (marked.parse(text) as string).trimEnd();
+    // marked-terminal pads everything with double newlines — collapse the air
+    // out of it so replies read as prose, not a sparse wall.
+    return (marked.parse(text) as string).replace(/\n{2,}/g, "\n\n").replace(/[ \t]+$/gm, "").trim();
   } catch {
     return text;
   }

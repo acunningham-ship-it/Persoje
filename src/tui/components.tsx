@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
 import type { CommandMeta } from "./commands.ts";
+import { theme } from "./theme.ts";
 
 export function Banner({
   version,
@@ -13,45 +14,42 @@ export function Banner({
   cwd: string;
   routerState: string;
 }): React.ReactElement {
+  // Short home-relative cwd to keep the line tight.
+  const home = process.env.HOME ?? "";
+  const shortCwd = home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1} marginBottom={1}>
+    <Box flexDirection="column" marginBottom={1}>
       <Text>
-        <Text color="cyan" bold>
-          ✳ persoje
-        </Text>
-        <Text dimColor> v{version} — token-efficient agentic CLI</Text>
+        <Text color={theme.accent}>✳ </Text>
+        <Text bold>persoje </Text>
+        <Text dimColor>v{version}</Text>
       </Text>
       <Text dimColor>
-        model {model} · router {routerState}
+        {model} · router {routerState} · {shortCwd}
       </Text>
-      <Text dimColor>cwd {cwd}</Text>
-      <Text dimColor>/help for commands · type / for the menu · esc cancels a turn</Text>
+      <Text dimColor>/ for commands · esc to interrupt</Text>
     </Box>
   );
 }
 
-const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+// Cycling verbs give the wait some personality without a token ticker fighting for space.
+const VERBS = ["Thinking", "Working", "Pondering", "Crunching", "Reasoning", "Brewing"];
+const FRAMES = ["·", "✢", "✳", "✶", "✳", "✢"];
 
-export function Spinner({ label, startedAt }: { label: string; startedAt: number }): React.ReactElement {
-  const [frame, setFrame] = useState(0);
-  const [, force] = useState(0);
+export function Spinner({ detail, startedAt }: { detail?: string; startedAt: number }): React.ReactElement {
+  const [tick, setTick] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => {
-      setFrame((f) => (f + 1) % FRAMES.length);
-      force((n) => n + 1); // refresh elapsed seconds
-    }, 120);
+    const t = setInterval(() => setTick((n) => n + 1), 130);
     return () => clearInterval(t);
   }, []);
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+  const verb = VERBS[Math.floor(elapsed / 4) % VERBS.length];
   return (
-    <Text>
-      <Text color="cyan">{FRAMES[frame]} </Text>
-      <Text>{label}</Text>
-      <Text dimColor>
-        {" "}
-        ({elapsed}s · esc to interrupt)
-      </Text>
-    </Text>
+    <Box marginTop={1}>
+      <Text color={theme.accent}>{FRAMES[tick % FRAMES.length]} </Text>
+      <Text>{detail ? detail : verb + "…"}</Text>
+      <Text dimColor> ({elapsed}s · esc)</Text>
+    </Box>
   );
 }
 
@@ -62,16 +60,16 @@ export function CommandMenu({
   items: CommandMeta[];
   selected: number;
 }): React.ReactElement {
-  const width = Math.max(...items.map((c) => (c.name + " " + (c.args ?? "")).length)) + 2;
+  const width = Math.max(...items.map((c) => c.name.length)) + 1;
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="gray" paddingX={1}>
+    <Box flexDirection="column" marginLeft={2}>
       {items.slice(0, 8).map((c, i) => (
-        <Text key={c.name} inverse={i === selected}>
-          <Text color="cyan">{(c.name + (c.args ? " " + c.args : "")).padEnd(width)}</Text>
-          <Text dimColor> {c.desc}</Text>
+        <Text key={c.name}>
+          <Text color={i === selected ? theme.accent : "gray"}>{i === selected ? "❯ " : "  "}</Text>
+          <Text color={i === selected ? theme.accent : undefined}>{c.name.padEnd(width)}</Text>
+          <Text dimColor> {c.args ? c.args + "  " : ""}{c.desc}</Text>
         </Text>
       ))}
-      <Text dimColor>↑↓ select · tab/enter complete · esc dismiss</Text>
     </Box>
   );
 }
@@ -86,23 +84,23 @@ export function ApprovalPrompt({
 }): React.ReactElement {
   const clip = (s: string, lines = 8): string[] => {
     const arr = s.split("\n");
-    return arr.length > lines ? [...arr.slice(0, lines), `… (${arr.length - lines} more lines)`] : arr;
+    return arr.length > lines ? [...arr.slice(0, lines), `… +${arr.length - lines} more`] : arr;
   };
 
   let body: React.ReactElement;
   if (name === "bash") {
-    body = <Text color="cyan">$ {String(args.command ?? "")}</Text>;
+    body = <Text color={theme.accent}>$ {String(args.command ?? "")}</Text>;
   } else if (name === "edit") {
     body = (
       <Box flexDirection="column">
         <Text bold>{String(args.path ?? "")}</Text>
         {clip(String(args.old_string ?? "")).map((l, i) => (
-          <Text key={`o${i}`} color="red">
+          <Text key={`o${i}`} color={theme.err}>
             - {l}
           </Text>
         ))}
         {clip(String(args.new_string ?? "")).map((l, i) => (
-          <Text key={`n${i}`} color="green">
+          <Text key={`n${i}`} color={theme.ok}>
             + {l}
           </Text>
         ))}
@@ -113,10 +111,10 @@ export function ApprovalPrompt({
     body = (
       <Box flexDirection="column">
         <Text bold>
-          {String(args.path ?? "")} <Text dimColor>({content.split("\n").length} lines, new/overwrite)</Text>
+          {String(args.path ?? "")} <Text dimColor>({content.split("\n").length} lines)</Text>
         </Text>
         {clip(content, 6).map((l, i) => (
-          <Text key={i} color="green">
+          <Text key={i} color={theme.ok}>
             + {l}
           </Text>
         ))}
@@ -127,12 +125,17 @@ export function ApprovalPrompt({
   }
 
   return (
-    <Box borderStyle="round" borderColor="yellow" paddingX={1} flexDirection="column">
-      <Text color="yellow" bold>
-        {name} wants to run:
+    <Box borderStyle="round" borderColor={theme.warn} paddingX={1} flexDirection="column" marginTop={1}>
+      <Text color={theme.warn} bold>
+        {name}
       </Text>
       {body}
-      <Text dimColor>[y] allow · [n] deny · [a] always allow {name} this session</Text>
+      <Box marginTop={1}>
+        <Text dimColor>
+          <Text color={theme.ok}>y</Text> allow · <Text color={theme.err}>n</Text> deny ·{" "}
+          <Text color={theme.accent}>a</Text> always allow {name}
+        </Text>
+      </Box>
     </Box>
   );
 }
