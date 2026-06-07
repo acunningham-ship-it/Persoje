@@ -158,14 +158,19 @@ async function main(): Promise<void> {
   const facts = new FactStore(join(GLOBAL_CONFIG_DIR, "memory"));
   const lessons = new LessonLog(join(GLOBAL_CONFIG_DIR, "memory", "lessons.jsonl"));
   const skills = new SkillLibrary(join(GLOBAL_CONFIG_DIR, "skills"));
+  // Project guide written by /init — loaded whole (it's capped at ~60 lines).
+  const projectGuide = await Bun.file(join(cwd, ".persoje", "PERSOJE.md"))
+    .text()
+    .catch(() => "");
   const memoryContext = config.memory.enabled
     ? [
+        projectGuide,
         facts.loadForSession(Math.floor(config.memory.budgetTokens * 0.6)),
         lessons.loadForSession(Math.floor(config.memory.budgetTokens * 0.4)),
       ]
         .filter(Boolean)
         .join("\n")
-    : "";
+    : projectGuide;
 
   const tools = buildRegistry();
   const agent = new Agent({ client, tools, config, cwd, repoMap, memoryContext, skills });
@@ -211,7 +216,7 @@ async function main(): Promise<void> {
     const React = await import("react");
     const { App } = await import("./tui/app.tsx");
     const instance = render(
-      React.createElement(App, { agent, store, sessionId, cwd, router, profiles, client, config, lessons }),
+      React.createElement(App, { agent, store, sessionId, cwd, router, profiles, client, config, lessons, facts, skills }),
       { exitOnCtrlC: true },
     );
     await instance.waitUntilExit();

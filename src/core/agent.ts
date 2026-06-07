@@ -92,6 +92,10 @@ export class Agent {
     return this.deps.config.model.primary;
   }
 
+  get repoMap(): string {
+    return this.deps.repoMap ?? "";
+  }
+
   set model(id: string) {
     this.deps.config.model.primary = id;
   }
@@ -203,7 +207,7 @@ export class Agent {
 
   private async *executeToolCall(call: ToolCallRequest, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
     const { tools, config, cwd } = this.deps;
-    const started = Date.now();
+    let started = Date.now();
     let tool = tools.get(call.name);
 
     // Hallucinated tool name → fuzzy-correct silently when unambiguous,
@@ -254,6 +258,7 @@ export class Agent {
         yield { type: "tool-result", id: call.id, name: tool.name, result: msg, isError: true, truncated: false, durationMs: 0 };
         return;
       }
+      started = Date.now(); // don't count time spent waiting for the user's answer
     }
 
     const ctx: ToolContext = { cwd, signal, bashTimeoutMs: config.loop.bashTimeoutMs };
