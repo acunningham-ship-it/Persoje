@@ -13,7 +13,7 @@ import type { SkillLibrary } from "../memory/skills.ts";
 import { runCanary, qualityFromScore } from "../router/canary.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { COMMANDS, filterCommands, helpText } from "./commands.ts";
-import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar } from "./components.tsx";
+import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar, AssistantBlock } from "./components.tsx";
 import { theme } from "./theme.ts";
 
 /** Single-width glyphs per tool so the ⏺ lines scan like hermes without emoji-width drift. */
@@ -630,14 +630,7 @@ export function App({
                 </Box>
               );
             case "assistant":
-              return (
-                <Box key={item.id} marginTop={1}>
-                  <Text color={theme.bullet}>⏺ </Text>
-                  <Box flexDirection="column">
-                    <Text>{renderMarkdown(item.text)}</Text>
-                  </Box>
-                </Box>
-              );
+              return <AssistantBlock key={item.id} body={<Text>{renderMarkdown(item.text)}</Text>} />;
             case "tool":
               return (
                 <Box key={item.id} flexDirection="column" marginTop={1}>

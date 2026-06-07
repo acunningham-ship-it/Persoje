@@ -73,6 +73,35 @@ export function Spinner({ detail, startedAt }: { detail?: string; startedAt: num
   );
 }
 
+function termWidth(): number {
+  return Math.min(process.stdout.columns || 80, 100);
+}
+
+/**
+ * Hermes-style titled message block: a top rule carrying the speaker's name,
+ * indented content, and a bottom rule. No side bars — so rendered markdown
+ * (code blocks especially) wraps naturally instead of fighting a border.
+ */
+export function AssistantBlock({ body }: { body: React.ReactNode }): React.ReactElement {
+  const width = termWidth();
+  const head = "╭─ ✦ persoje ";
+  const topFill = "─".repeat(Math.max(0, width - head.length - 1));
+  const bottom = "─".repeat(Math.max(0, width - 2));
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text>
+        <Text dimColor>╭─ </Text>
+        <Text color={theme.accent}>✦ persoje </Text>
+        <Text dimColor>{topFill}╮</Text>
+      </Text>
+      <Box marginLeft={2} flexDirection="column">
+        {body}
+      </Box>
+      <Text dimColor>╰{bottom}╯</Text>
+    </Box>
+  );
+}
+
 const fmtTok = (n: number): string => (n >= 1000 ? (n / 1000).toFixed(1) + "K" : String(n));
 const fmtSecs = (s: number): string => (s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s` : `${s}s`);
 
