@@ -43,9 +43,19 @@ type DisplayItem =
 /** Omit that distributes over union members (plain Omit collapses the union). */
 type DistOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
+type TrustLevel = "normal" | "auto-edit" | "yolo";
+const TRUST_CYCLE: TrustLevel[] = ["normal", "auto-edit", "yolo"];
+const TRUST_LABEL: Record<TrustLevel, string> = {
+  normal: "normal (confirm edits & commands)",
+  "auto-edit": "auto-edit (edits auto-run, commands confirm)",
+  yolo: "yolo (auto-run all; danger still confirms)",
+};
+
 interface PendingApproval {
   name: string;
   args: Record<string, unknown>;
+  /** Set when the danger guard flagged this — confirmed even in yolo. */
+  dangerReason?: string;
   resolve: (ok: boolean) => void;
 }
 
@@ -133,6 +143,9 @@ export function App({
   const [busyLabel, setBusyLabel] = useState("thinking");
   const [busyStart, setBusyStart] = useState(Date.now());
   const [pending, setPending] = useState<PendingApproval | null>(null);
+  const [trust, setTrust] = useState<TrustLevel>("normal");
+  const trustRef = useRef<TrustLevel>("normal");
+  trustRef.current = trust;
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
@@ -195,9 +208,17 @@ export function App({
     void Bun.write(HISTORY_PATH, JSON.stringify(h.slice(0, 100))).catch(() => {});
   };
 
-  // Approval hook: pause the agent until the user answers y/n/a.
+  // Approval hook. Danger always prompts (core flags it); otherwise the trust
+  // level decides: yolo auto-runs everything, auto-edit auto-runs write/edit,
+  // normal confirms all mutations. `a` adds a per-tool always-allow.
   useEffect(() => {
-    agent.setApprover(async (name, args) => {
+    agent.setApprover(async (name, args, dangerReason) => {
+      if (dangerReason) {
+        return new Promise<boolean>((resolve) => setPending({ name, args, dangerReason, resolve }));
+      }
+      const level = trustRef.current;
+      if (level === "yolo") return true;
+      if (level === "auto-edit" && (name === "write" || name === "edit")) return true;
       if (alwaysAllow.current.has(name)) return true;
       return new Promise<boolean>((resolve) => setPending({ name, args, resolve }));
     });
@@ -556,11 +577,10 @@ export function App({
           break;
         }
         case "/permsoff": {
-          // Auto-approve all tools — no confirmation prompts
-          for (const t of ["read", "write", "edit", "bash", "grep", "glob", "ls", "task"]) {
-            alwaysAllow.current.add(t);
-          }
-          push({ kind: "info", text: "🔓 all tools auto-approved — no confirmation prompts. Use /permissions clear to re-enable." });
+          // yolo: auto-run everything. The core danger guard still confirms
+          // catastrophic ops (rm -rf /, force-push, secrets, etc.).
+          setTrust("yolo");
+          push({ kind: "info", text: "🔓 yolo — all tools auto-run (danger ops still confirm). shift+tab to cycle, or set trust normal." });
           break;
         }
         case "/effort": {
@@ -799,6 +819,14 @@ export function App({
       else void runTurn(line);
     };
 
+    // shift+tab cycles the trust level (normal → auto-edit → yolo → …).
+    if (key.tab && key.shift) {
+      const next = TRUST_CYCLE[(TRUST_CYCLE.indexOf(trustRef.current) + 1) % TRUST_CYCLE.length]!;
+      setTrust(next);
+      push({ kind: "info", text: `trust: ${TRUST_LABEL[next]}` });
+      return;
+    }
+
     if (key.escape) {
       if (busy) abortRef.current?.abort();
       else setInput("");
@@ -942,7 +970,7 @@ export function App({
       ) : null}
       {busy ? <Spinner detail={busyLabel === "thinking" ? undefined : busyLabel} startedAt={busyStart} effort={(config as any).effort?.level ?? "mid"} /> : null}
 
-      {pending ? <ApprovalPrompt name={pending.name} args={pending.args} /> : null}
+      {pending ? <ApprovalPrompt name={pending.name} args={pending.args} dangerReason={pending.dangerReason} /> : null}
 
       {!pending ? (
         <Box flexDirection="column" marginTop={1}>
@@ -982,6 +1010,7 @@ export function App({
               effort={(config as any).effort?.level ?? "mid"}
               iterations={turnIterations}
               planMode={(config as any).planMode ?? false}
+              trust={trust}
               activeTheme={activeTheme}
             />
           )}

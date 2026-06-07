@@ -10,6 +10,7 @@ import { closestToolName } from "../guardrails/fuzzy.ts";
 import { rescueToolCalls } from "../guardrails/rescue.ts";
 import { LoopDetector } from "../guardrails/loops.ts";
 import { postEditCheck } from "../guardrails/verify.ts";
+import { assessDanger } from "../guardrails/danger.ts";
 import { resolve } from "node:path";
 
 export interface AgentDeps {
@@ -29,7 +30,7 @@ export interface AgentDeps {
    * Approval hook for mutating tools (bash/write/edit). Return false to deny.
    * Absent hook = auto-approve (plain REPL / one-shot mode).
    */
-  approve?: (name: string, args: Record<string, unknown>) => Promise<boolean>;
+  approve?: (name: string, args: Record<string, unknown>, dangerReason?: string) => Promise<boolean>;
   /** Guardrail failure sink — the router subscribes to learn which models misbehave. */
   onFailure?: (kind: "validation" | "loop" | "syntax" | "rescue", model: string) => void;
 }
@@ -269,8 +270,24 @@ export class Agent {
 
     yield { type: "tool-start", id: call.id, name: tool.name, args: parsed.data as Record<string, unknown> };
 
-    if (MUTATING_TOOLS.has(tool.name) && this.deps.approve) {
-      const ok = await this.deps.approve(tool.name, parsed.data as Record<string, unknown>);
+    // Danger guard is enforced in CORE so no UI trust level (not even yolo) can
+    // bypass it. Dangerous calls always go through approve() with a reason; the
+    // TUI is required to confirm those regardless of permsoff/always-allow.
+    const danger = assessDanger(tool.name, parsed.data as Record<string, unknown>, cwd);
+    // No approver (headless / one-shot): refuse dangerous ops rather than run
+    // them blind. Routine mutations still auto-run in those modes.
+    if (danger.dangerous && !this.deps.approve) {
+      const msg = `Refused (${danger.reason}): this needs interactive confirmation, which isn't available here. Use a safer approach or run it yourself.`;
+      this.context.addToolResult(call.id, msg, 120);
+      yield { type: "tool-result", id: call.id, name: tool.name, result: msg, isError: true, truncated: false, durationMs: 0 };
+      return;
+    }
+    if ((danger.dangerous || MUTATING_TOOLS.has(tool.name)) && this.deps.approve) {
+      const ok = await this.deps.approve(
+        tool.name,
+        parsed.data as Record<string, unknown>,
+        danger.dangerous ? danger.reason : undefined,
+      );
       if (!ok) {
         const msg = "Denied by user. Ask before retrying this action, or try a different approach.";
         this.context.addToolResult(call.id, msg, 100);

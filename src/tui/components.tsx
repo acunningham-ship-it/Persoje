@@ -148,6 +148,7 @@ export function StatusBar({
   effort,
   iterations,
   planMode,
+  trust,
   activeTheme,
 }: {
   model: string;
@@ -161,6 +162,7 @@ export function StatusBar({
   effort?: string;
   iterations?: number;
   planMode?: boolean;
+  trust?: string;
   activeTheme?: Theme;
 }): React.ReactElement {
   const t = activeTheme ?? theme;
@@ -201,6 +203,12 @@ export function StatusBar({
           <Text color={t.warn}>📋 PLAN</Text>
         </>
       ) : null}
+      {trust && trust !== "normal" ? (
+        <>
+          {sep}
+          <Text color={trust === "yolo" ? t.err : t.warn}>{trust === "yolo" ? "🔓 YOLO" : "✎ auto-edit"}</Text>
+        </>
+      ) : null}
       {busy ? (
         <>
           {sep}
@@ -239,9 +247,11 @@ export function CommandMenu({
 export function ApprovalPrompt({
   name,
   args,
+  dangerReason,
 }: {
   name: string;
   args: Record<string, unknown>;
+  dangerReason?: string;
 }): React.ReactElement {
   const clip = (s: string, lines = 8): string[] => {
     const arr = s.split("\n");
@@ -286,15 +296,24 @@ export function ApprovalPrompt({
   }
 
   return (
-    <Box borderStyle="round" borderColor={theme.warn} paddingX={1} flexDirection="column" marginTop={1}>
-      <Text color={theme.warn} bold>
+    <Box borderStyle="round" borderColor={dangerReason ? theme.err : theme.warn} paddingX={1} flexDirection="column" marginTop={1}>
+      {dangerReason ? (
+        <Text color={theme.err} bold>
+          ⚠ DANGER — {dangerReason} (confirmed even in yolo)
+        </Text>
+      ) : null}
+      <Text color={dangerReason ? theme.err : theme.warn} bold>
         ◆ {name}
       </Text>
       {body}
       <Box marginTop={1}>
         <Text dimColor>
-          <Text color={theme.ok}>y</Text> allow · <Text color={theme.err}>n</Text> deny ·{" "}
-          <Text color={theme.accent}>a</Text> always allow {name}
+          <Text color={theme.ok}>y</Text> allow · <Text color={theme.err}>n</Text> deny
+          {dangerReason ? "" : (
+            <>
+              {" "}· <Text color={theme.accent}>a</Text> always allow {name}
+            </>
+          )}
         </Text>
       </Box>
     </Box>

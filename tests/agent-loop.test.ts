@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { Agent } from "../src/core/agent.ts";
 import { ToolRegistry } from "../src/tools/types.ts";
 import { readTool } from "../src/tools/file-tools.ts";
+import { bashTool } from "../src/tools/shell-tools.ts";
 import type { ChatRequest, StreamEvent } from "../src/models/openrouter.ts";
 import type { AgentEvent } from "../src/core/events.ts";
 import { z } from "zod";
@@ -227,4 +228,57 @@ test("oversized tool results are truncated before entering history", async () =>
   expect(result.truncated).toBe(true);
   const toolMsg = agent.context.history().find((m) => m.role === "tool") as any;
   expect(toolMsg.content.length).toBeLessThan(1000); // 100 tokens ≈ 400 chars + marker
+});
+
+test("danger guard: dangerous bash routes through approve with a reason", async () => {
+  const registry = new ToolRegistry();
+  registry.register(bashTool);
+  const client = fakeClient([
+    [{ type: "tool-calls", calls: [{ id: "c1", name: "bash", argsJson: JSON.stringify({ command: "git push --force" }) }] }, usage],
+    [{ type: "text", delta: "ok" }, usage],
+  ]);
+  let sawReason: string | undefined;
+  const agent = new Agent({
+    client,
+    tools: registry,
+    config: makeConfig(),
+    cwd: "/tmp",
+    approve: async (_n, _a, dangerReason) => {
+      sawReason = dangerReason;
+      return false; // user denies
+    },
+  });
+  const events = await collect(agent.run("force push"));
+  expect(sawReason).toContain("force-push");
+  const result = events.find((e) => e.type === "tool-result") as any;
+  expect(result.isError).toBe(true);
+  expect(result.result).toContain("Denied");
+});
+
+test("danger guard: refused when no approver (headless)", async () => {
+  const registry = new ToolRegistry();
+  registry.register(bashTool);
+  const client = fakeClient([
+    [{ type: "tool-calls", calls: [{ id: "c1", name: "bash", argsJson: JSON.stringify({ command: "sudo rm -rf /etc" }) }] }, usage],
+    [{ type: "text", delta: "ok" }, usage],
+  ]);
+  const agent = new Agent({ client, tools: registry, config: makeConfig(), cwd: "/tmp" }); // no approve
+  const events = await collect(agent.run("go"));
+  const result = events.find((e) => e.type === "tool-result") as any;
+  expect(result.isError).toBe(true);
+  expect(result.result).toContain("Refused");
+});
+
+test("routine bash still runs without approver (one-shot)", async () => {
+  const registry = new ToolRegistry();
+  registry.register(bashTool);
+  const client = fakeClient([
+    [{ type: "tool-calls", calls: [{ id: "c1", name: "bash", argsJson: JSON.stringify({ command: "echo hi" }) }] }, usage],
+    [{ type: "text", delta: "done" }, usage],
+  ]);
+  const agent = new Agent({ client, tools: registry, config: makeConfig(), cwd: "/tmp" });
+  const events = await collect(agent.run("go"));
+  const result = events.find((e) => e.type === "tool-result") as any;
+  expect(result.isError).toBe(false);
+  expect(result.result).toContain("hi");
 });
