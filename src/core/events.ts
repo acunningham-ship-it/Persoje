@@ -28,6 +28,8 @@ export type AgentEvent =
       durationMs: number;
     }
   | { type: "usage"; usage: UsageReport }
+  | { type: "guardrail"; kind: "rescue" | "fuzzy" | "loop" | "syntax"; message: string }
+  | { type: "router"; message: string; target: string | null }
   | { type: "compaction"; beforeTokens: number; afterTokens: number }
   | { type: "turn-end"; reason: TurnEndReason; iterations: number }
   | { type: "error"; message: string; fatal: boolean };

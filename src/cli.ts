@@ -1,14 +1,20 @@
 #!/usr/bin/env bun
 import chalk from "chalk";
 import * as readline from "node:readline/promises";
+import { join } from "node:path";
 import { Agent } from "./core/agent.ts";
-import { loadConfig, resolveApiKey } from "./config/config.ts";
+import { loadConfig, resolveApiKey, GLOBAL_CONFIG_DIR, GLOBAL_CONFIG_PATH } from "./config/config.ts";
 import { OpenRouterClient } from "./models/openrouter.ts";
 import { ToolRegistry } from "./tools/types.ts";
 import { readTool, writeTool, editTool, lsTool, globTool } from "./tools/file-tools.ts";
 import { bashTool, grepTool } from "./tools/shell-tools.ts";
 import { SessionStore } from "./session/store.ts";
 import { buildRepoMap } from "./context/repo-map.ts";
+import { ProfileStore, Router } from "./router/router.ts";
+import { FactStore } from "./memory/facts.ts";
+import { LessonLog } from "./memory/lessons.ts";
+import { SkillLibrary } from "./memory/skills.ts";
+import { makeTaskTool } from "./agents/subagent.ts";
 
 const VERSION = "0.1.0";
 
@@ -64,6 +70,12 @@ async function runTurn(agent: Agent, input: string): Promise<void> {
         case "compaction":
           process.stdout.write(chalk.dim(`  ⇣ compacted ~${ev.beforeTokens} → ~${ev.afterTokens} tok\n`));
           break;
+        case "guardrail":
+          process.stdout.write(chalk.yellow(`  ⛨ ${ev.kind}: ${ev.message}\n`));
+          break;
+        case "router":
+          process.stdout.write(chalk.magenta(`  ⇄ router: ${ev.message}\n`));
+          break;
         case "error":
           process.stdout.write(chalk.red(`\n✗ ${ev.message}\n`));
           break;
@@ -109,6 +121,29 @@ async function main(): Promise<void> {
     return;
   }
 
+  // First run: no config and no key → interactive setup.
+  if (!(await Bun.file(GLOBAL_CONFIG_PATH).exists()) && !process.env.OPENROUTER_API_KEY && process.stdout.isTTY) {
+    const { runSetupWizard } = await import("./setup/wizard.ts");
+    if (!(await runSetupWizard())) return;
+  }
+
+  // `persoje dream` — offline memory consolidation on a free model.
+  if (args[0] === "dream") {
+    const config = await loadConfig();
+    const client = new OpenRouterClient(resolveApiKey(config), config.openrouter.baseUrl);
+    const { runDream } = await import("./memory/dream.ts");
+    const result = await runDream({
+      client,
+      model: config.memory.dreamModel || config.model.compactor || config.model.primary,
+      store: new SessionStore(),
+      facts: new FactStore(join(GLOBAL_CONFIG_DIR, "memory")),
+      lessons: new LessonLog(join(GLOBAL_CONFIG_DIR, "memory", "lessons.jsonl")),
+      log: (line) => console.log(chalk.dim(line)),
+    });
+    console.log(chalk.bold(`dream complete: ${result.factsAdded} new facts, ${result.lessonsCompacted} lessons kept`));
+    return;
+  }
+
   const config = await loadConfig();
   // --model flag overrides config
   const modelIdx = args.indexOf("--model");
@@ -118,7 +153,24 @@ async function main(): Promise<void> {
   const client = new OpenRouterClient(apiKey, config.openrouter.baseUrl);
   const cwd = process.cwd();
   const repoMap = await buildRepoMap(cwd, config.context.repoMapTokens).catch(() => "");
-  const agent = new Agent({ client, tools: buildRegistry(), config, cwd, repoMap });
+
+  // Memory: bounded index + lessons at session start; skills injected per turn.
+  const facts = new FactStore(join(GLOBAL_CONFIG_DIR, "memory"));
+  const lessons = new LessonLog(join(GLOBAL_CONFIG_DIR, "memory", "lessons.jsonl"));
+  const skills = new SkillLibrary(join(GLOBAL_CONFIG_DIR, "skills"));
+  const memoryContext = config.memory.enabled
+    ? [
+        facts.loadForSession(Math.floor(config.memory.budgetTokens * 0.6)),
+        lessons.loadForSession(Math.floor(config.memory.budgetTokens * 0.4)),
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "";
+
+  const tools = buildRegistry();
+  const agent = new Agent({ client, tools, config, cwd, repoMap, memoryContext, skills });
+  // The task tool lets the main model delegate to isolated sub-agents.
+  tools.register(makeTaskTool({ client, tools, config, cwd }));
 
   // One-shot mode: persoje "do the thing" (no persistence, auto-approve)
   const flagsWithValue = new Set(["--model", "--resume"]);
@@ -147,10 +199,21 @@ async function main(): Promise<void> {
     agent.context.onAppend = (msg) => store.appendMessage(sessionId, msg);
     agent.context.onCompact = (messages) => store.replaceMessages(sessionId, messages);
 
+    const profiles = new ProfileStore();
+    const router = new Router({
+      enabled: config.router.enabled,
+      mode: config.router.mode,
+      failureThreshold: config.router.failureThreshold,
+      profiles,
+    });
+
     const { render } = await import("ink");
     const React = await import("react");
     const { App } = await import("./tui/app.tsx");
-    const instance = render(React.createElement(App, { agent, store, sessionId, cwd }), { exitOnCtrlC: true });
+    const instance = render(
+      React.createElement(App, { agent, store, sessionId, cwd, router, profiles, client, config, lessons }),
+      { exitOnCtrlC: true },
+    );
     await instance.waitUntilExit();
     store.close();
     return;

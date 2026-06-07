@@ -38,6 +38,29 @@ const ConfigSchema = z.object({
     .prefault({}),
   /** Per-tool result caps in tokens (overrides tool defaults). */
   toolResultCaps: z.record(z.string(), z.number()).default({}),
+  router: z
+    .object({
+      /** Master toggle: off = fully manual model selection (no escalation suggestions, no canary). */
+      enabled: z.boolean().default(true),
+      /** "offer" suggests a switch; "auto" switches the primary model itself. */
+      mode: z.enum(["offer", "auto"]).default("offer"),
+      /** Guardrail failures within the window before escalation fires. */
+      failureThreshold: z.number().default(3),
+      /** Run the 3-prompt canary on first use of an unknown model (interactive only). */
+      canary: z.boolean().default(true),
+      /** Default escalation target when a model profile has none. */
+      escalateTo: z.string().default(""),
+    })
+    .prefault({}),
+  memory: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** Combined session-start budget for memory index + lessons (tokens). */
+      budgetTokens: z.number().default(1200),
+      /** Model for `persoje dream` consolidation. Empty = compactor, then primary. */
+      dreamModel: z.string().default(""),
+    })
+    .prefault({}),
   openrouter: z
     .object({
       baseUrl: z.string().default("https://openrouter.ai/api/v1"),

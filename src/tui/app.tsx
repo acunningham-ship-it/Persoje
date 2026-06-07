@@ -2,6 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useInput } from "ink";
 import type { Agent } from "../core/agent.ts";
 import type { SessionStore } from "../session/store.ts";
+import type { Router, ProfileStore } from "../router/router.ts";
+import type { OpenRouterClient } from "../models/openrouter.ts";
+import type { PersojeConfig } from "../config/config.ts";
+import type { LessonLog } from "../memory/lessons.ts";
+import { runCanary, qualityFromScore } from "../router/canary.ts";
 import { renderMarkdown } from "./markdown.ts";
 
 type DisplayItem =
@@ -25,6 +30,11 @@ export interface AppProps {
   store: SessionStore;
   sessionId: string;
   cwd: string;
+  router: Router;
+  profiles: ProfileStore;
+  client: OpenRouterClient;
+  config: PersojeConfig;
+  lessons: LessonLog;
 }
 
 function fmtCost(cost: number): string {
@@ -37,7 +47,8 @@ function argsPreview(args: Record<string, unknown>): string {
 }
 
 const HELP = `commands:
-  /model [id]    show or switch model
+  /model [id]    show or switch model (shows profile + quirks)
+  /router        on|off|auto|offer — toggle model routing
   /cost          session totals
   /sessions      recent sessions in this directory
   /resume <id>   resume a session
@@ -48,7 +59,17 @@ keys: enter send · up/down history · esc cancel turn · y/n/a on permission pr
 
 let nextId = 1;
 
-export function App({ agent, store, sessionId: initialSession, cwd }: AppProps): React.ReactElement {
+export function App({
+  agent,
+  store,
+  sessionId: initialSession,
+  cwd,
+  router,
+  profiles,
+  client,
+  config,
+  lessons,
+}: AppProps): React.ReactElement {
   const { exit } = useApp();
   const [sessionId, setSessionId] = useState(initialSession);
   const [items, setItems] = useState<DisplayItem[]>([]);
@@ -76,6 +97,55 @@ export function App({ agent, store, sessionId: initialSession, cwd }: AppProps):
       return new Promise<boolean>((resolve) => setPending({ name, args, resolve }));
     });
   }, [agent]);
+
+  // Router: guardrail failures feed escalation. "offer" suggests, "auto" switches.
+  useEffect(() => {
+    agent.setFailureSink((kind, model) => {
+      router.recordFailure(model, kind);
+      const esc = router.shouldEscalate(model);
+      if (!esc) return;
+      if (router.mode === "auto" && esc.target) {
+        agent.model = esc.target;
+        push({ kind: "info", text: `⇄ router: ${esc.reason} — auto-switched to ${esc.target}` });
+      } else {
+        push({
+          kind: "info",
+          text: `⇄ router: ${esc.reason}${esc.target ? ` — consider /model ${esc.target}` : " — consider a stronger model"}`,
+        });
+      }
+    });
+  }, [agent, router, push]);
+
+  // Canary: first use of an unknown/variable model gets a 3-prompt smoke test;
+  // the verdict persists to ~/.config/persoje/models.json and tunes strictness.
+  const canaried = useRef(new Set<string>());
+  const maybeCanary = useCallback(
+    async (modelId: string) => {
+      if (!router.enabled || !config.router.canary || canaried.current.has(modelId)) return;
+      const profile = profiles.get(modelId);
+      if (profile.canary || profile.toolQuality === "excellent" || profile.toolQuality === "good") return;
+      canaried.current.add(modelId);
+      push({ kind: "info", text: `testing ${modelId} (3-prompt canary)…` });
+      try {
+        const result = await runCanary(client, modelId);
+        const quality = qualityFromScore(result.score);
+        profiles.upsert({
+          ...profile,
+          toolQuality: quality,
+          canary: { score: result.score, total: result.total, testedAt: Date.now(), notes: result.notes },
+        });
+        const notes = result.notes.length ? ` (${result.notes.join("; ")})` : "";
+        push({ kind: "info", text: `canary: ${result.score}/${result.total} → ${quality}${notes}` });
+      } catch (e) {
+        push({ kind: "info", text: `canary failed: ${(e as Error).message}` });
+      }
+    },
+    [client, config, profiles, push, router],
+  );
+  useEffect(() => {
+    void maybeCanary(agent.model);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Batch streaming deltas: flush at 80ms so Ink isn't re-rendering per token.
   useEffect(() => {
@@ -134,12 +204,27 @@ export function App({ agent, store, sessionId: initialSession, cwd }: AppProps):
             case "compaction":
               push({ kind: "info", text: `compacted history: ~${ev.beforeTokens} → ~${ev.afterTokens} tok` });
               break;
+            case "guardrail":
+              push({ kind: "info", text: `⛨ ${ev.kind}: ${ev.message}` });
+              break;
+            case "router":
+              push({ kind: "info", text: `⇄ ${ev.message}${ev.target ? ` — switch with /model ${ev.target}` : ""}` });
+              break;
             case "error":
               push({ kind: "error", text: ev.message });
               break;
             case "turn-end":
               if (ev.reason === "max-iterations") push({ kind: "info", text: `stopped after ${ev.iterations} iterations` });
               if (ev.reason === "cancelled") push({ kind: "info", text: "turn cancelled" });
+              // Failed turns become lessons; `persoje dream` curates them later.
+              if (ev.reason === "max-iterations" || ev.reason === "error") {
+                lessons.append({
+                  task: text.slice(0, 120),
+                  error: ev.reason,
+                  lesson: `Turn ended with ${ev.reason} after ${ev.iterations} iterations`,
+                  model: agent.model,
+                });
+              }
               break;
           }
         }
@@ -151,7 +236,7 @@ export function App({ agent, store, sessionId: initialSession, cwd }: AppProps):
         abortRef.current = null;
       }
     },
-    [agent, push, sessionId, store],
+    [agent, lessons, push, sessionId, store],
   );
 
   const handleCommand = useCallback(
@@ -169,9 +254,23 @@ export function App({ agent, store, sessionId: initialSession, cwd }: AppProps):
           if (rest[0]) {
             agent.model = rest[0];
             push({ kind: "info", text: `model → ${rest[0]}` });
+            void maybeCanary(rest[0]);
           } else {
-            push({ kind: "info", text: `model: ${agent.model}` });
+            const p = profiles.get(agent.model);
+            push({
+              kind: "info",
+              text: `model: ${agent.model} (${p.toolQuality}${p.quirks.length ? `; quirks: ${p.quirks.join(", ")}` : ""})`,
+            });
           }
+          break;
+        case "/router":
+          if (rest[0] === "on") router.enabled = true;
+          else if (rest[0] === "off") router.enabled = false;
+          else if (rest[0] === "auto" || rest[0] === "offer") router.mode = rest[0];
+          push({
+            kind: "info",
+            text: `router: ${router.enabled ? "on" : "off"} · mode: ${router.mode} (usage: /router on|off|auto|offer)`,
+          });
           break;
         case "/cost": {
           const t = agent.accounting.totals();
@@ -227,7 +326,7 @@ export function App({ agent, store, sessionId: initialSession, cwd }: AppProps):
           push({ kind: "info", text: `unknown command ${cmd} — /help` });
       }
     },
-    [agent, cwd, exit, push, store],
+    [agent, cwd, exit, maybeCanary, profiles, push, router, store],
   );
 
   useInput((char, key) => {

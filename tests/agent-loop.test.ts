@@ -119,6 +119,94 @@ test("max iterations stops a tool-calling loop", async () => {
   expect(events.find((e) => e.type === "turn-end")).toMatchObject({ reason: "max-iterations", iterations: 5 });
 });
 
+test("rescues tool calls embedded in text (Hermes-style) and executes them", async () => {
+  const registry = new ToolRegistry();
+  registry.register(readTool);
+  const client = fakeClient([
+    [
+      { type: "text", delta: 'Let me read that.\n<tool_call>{"name": "read", "arguments": {"path": "/etc/hostname"}}</tool_call>' },
+      usage,
+    ],
+    [{ type: "text", delta: "Got it." }, usage],
+  ]);
+  const failures: string[] = [];
+  const agent = new Agent({
+    client,
+    tools: registry,
+    config: makeConfig(),
+    cwd: "/tmp",
+    onFailure: (kind) => failures.push(kind),
+  });
+  const events = await collect(agent.run("read hostname"));
+
+  expect(events.find((e) => e.type === "guardrail" && (e as any).kind === "rescue")).toBeTruthy();
+  expect(events.find((e) => e.type === "tool-result" && !(e as any).isError)).toBeTruthy();
+  expect(failures).toContain("rescue");
+  expect(events.find((e) => e.type === "turn-end")).toMatchObject({ reason: "done" });
+});
+
+test("fuzzy-corrects hallucinated tool names (read_file → read)", async () => {
+  const registry = new ToolRegistry();
+  registry.register(readTool);
+  const client = fakeClient([
+    [{ type: "tool-calls", calls: [{ id: "c1", name: "read_file", argsJson: '{"path":"/etc/hostname"}' }] }, usage],
+    [{ type: "text", delta: "done" }, usage],
+  ]);
+  const agent = new Agent({ client, tools: registry, config: makeConfig(), cwd: "/tmp" });
+  const events = await collect(agent.run("go"));
+
+  const fuzzy = events.find((e) => e.type === "guardrail" && (e as any).kind === "fuzzy") as any;
+  expect(fuzzy?.message).toContain("read");
+  const result = events.find((e) => e.type === "tool-result") as any;
+  expect(result.isError).toBe(false);
+});
+
+test("blocks identical repeated calls via loop detector", async () => {
+  const registry = new ToolRegistry();
+  registry.register({
+    name: "noop",
+    description: "noop",
+    args: z.object({}),
+    maxResultTokens: 100,
+    execute: async () => "same answer",
+  });
+  const client = fakeClient([
+    [{ type: "tool-calls", calls: [{ id: "c", name: "noop", argsJson: "{}" }] }, usage],
+  ]);
+  const agent = new Agent({ client, tools: registry, config: makeConfig(), cwd: "/tmp" });
+  const events = await collect(agent.run("loop"));
+
+  const loopEvents = events.filter((e) => e.type === "guardrail" && (e as any).kind === "loop");
+  expect(loopEvents.length).toBeGreaterThan(0); // detector fired and blocked execution
+});
+
+test("post-edit syntax check warns the model about broken files", async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "persoje-syntax-"));
+
+  const registry = new ToolRegistry();
+  const { writeTool } = await import("../src/tools/file-tools.ts");
+  registry.register(writeTool);
+  const client = fakeClient([
+    [
+      {
+        type: "tool-calls",
+        calls: [{ id: "c1", name: "write", argsJson: JSON.stringify({ path: "broken.ts", content: "const x = {;" }) }],
+      },
+      usage,
+    ],
+    [{ type: "text", delta: "hmm" }, usage],
+  ]);
+  const agent = new Agent({ client, tools: registry, config: makeConfig(), cwd: dir });
+  const events = await collect(agent.run("write it"));
+
+  expect(events.find((e) => e.type === "guardrail" && (e as any).kind === "syntax")).toBeTruthy();
+  const result = events.find((e) => e.type === "tool-result") as any;
+  expect(result.result).toContain("WARNING");
+});
+
 test("oversized tool results are truncated before entering history", async () => {
   const registry = new ToolRegistry();
   registry.register({
