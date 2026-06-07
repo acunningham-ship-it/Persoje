@@ -632,17 +632,25 @@ export function App({
             case "assistant":
               return <AssistantBlock key={item.id} body={<Text>{renderMarkdown(item.text)}</Text>} />;
             case "tool":
-              return (
+              // Single dense row (hermes style): bar · icon · name(args) · result.
+              // Errors keep the result on its own ⎿ line where there's room to read.
+              return item.isError ? (
                 <Box key={item.id} flexDirection="column" marginTop={1}>
                   <Text>
-                    <Text color={item.isError ? theme.err : theme.accent}>{TOOL_ICON[item.name] ?? "⏺"} </Text>
+                    <Text color={theme.err}>│ </Text>
+                    <Text color={theme.err}>{TOOL_ICON[item.name] ?? "⏺"} </Text>
                     <Text bold>{item.name}</Text>
                     <Text dimColor>({item.argsPreview})</Text>
                   </Text>
-                  <Text color={item.isError ? theme.err : theme.bullet}>
-                    {"  ⎿ "}
-                    <Text dimColor={!item.isError}>{item.note}</Text>
-                  </Text>
+                  <Text color={theme.err}>{"  ⎿ "}{item.note}</Text>
+                </Box>
+              ) : (
+                <Box key={item.id} marginTop={1}>
+                  <Text dimColor>│ </Text>
+                  <Text color={theme.accent}>{TOOL_ICON[item.name] ?? "⏺"} </Text>
+                  <Text>{item.name}</Text>
+                  <Text dimColor>({item.argsPreview}) </Text>
+                  <Text dimColor>· {item.note}</Text>
                 </Box>
               );
             case "info":

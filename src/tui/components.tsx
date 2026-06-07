@@ -3,6 +3,24 @@ import { Box, Text } from "ink";
 import type { CommandMeta } from "./commands.ts";
 import { theme } from "./theme.ts";
 
+// Dependency-free gradient: interpolate per-character between two hex stops.
+// (ink-gradient pulls in chroma/tinygradient — not worth the bundle for one word.)
+function gradient(text: string, from: [number, number, number], to: [number, number, number]): React.ReactElement[] {
+  const n = text.length;
+  const hex = (c: number) => c.toString(16).padStart(2, "0");
+  return [...text].map((ch, i) => {
+    const t = n <= 1 ? 0 : i / (n - 1);
+    const r = Math.round(from[0] + (to[0] - from[0]) * t);
+    const g = Math.round(from[1] + (to[1] - from[1]) * t);
+    const b = Math.round(from[2] + (to[2] - from[2]) * t);
+    return (
+      <Text key={i} color={`#${hex(r)}${hex(g)}${hex(b)}`} bold>
+        {ch}
+      </Text>
+    );
+  });
+}
+
 export function Banner({
   version,
   model,
@@ -29,9 +47,9 @@ export function Banner({
       >
         <Text>
           <Text color={theme.accent} bold>
-            ✻
+            ✻{" "}
           </Text>
-          <Text bold> Welcome to persoje</Text>
+          {gradient("persoje", [250, 121, 33], [255, 207, 107])}
           <Text dimColor> v{version}</Text>
         </Text>
         <Box marginTop={1}>
