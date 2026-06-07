@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { UsageReport } from "../core/events.ts";
 
 /** OpenAI-compatible message shapes (OpenRouter speaks this dialect for every model). */
@@ -72,8 +74,25 @@ export class OpenRouterClient {
     private baseUrl = "https://openrouter.ai/api/v1",
   ) {}
 
-  /** Fetch the model catalog → id ⇒ real context-window size (for the status gauge). */
+  /**
+   * Fetch the model catalog → id ⇒ real context-window size (for the status gauge).
+   * Cached to disk for 24h — the catalog barely changes and the fetch is ~hundreds of
+   * KB, so hitting it on every cold start was pure latency.
+   */
   async modelContextWindows(): Promise<Map<string, number>> {
+    const cachePath = join(homedir(), ".config", "persoje", "models-cache.json");
+    const TTL = 24 * 60 * 60 * 1000;
+
+    // Serve from cache if fresh.
+    try {
+      const cached = (await Bun.file(cachePath).json()) as { fetchedAt: number; windows: Record<string, number> };
+      if (cached.fetchedAt && Date.now() - cached.fetchedAt < TTL) {
+        return new Map(Object.entries(cached.windows));
+      }
+    } catch {
+      // no cache or unparseable — fall through to fetch
+    }
+
     const map = new Map<string, number>();
     try {
       const res = await fetch(`${this.baseUrl}/models`, {
@@ -82,6 +101,8 @@ export class OpenRouterClient {
       if (!res.ok) return map;
       const data = (await res.json()) as { data?: Array<{ id: string; context_length?: number }> };
       for (const m of data.data ?? []) if (m.context_length) map.set(m.id, m.context_length);
+      // Persist for next launch (best-effort).
+      void Bun.write(cachePath, JSON.stringify({ fetchedAt: Date.now(), windows: Object.fromEntries(map) })).catch(() => {});
     } catch {
       // offline / rate-limited — gauge falls back to the compaction budget
     }

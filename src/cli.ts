@@ -175,7 +175,16 @@ async function main(): Promise<void> {
   const apiKey = resolveApiKey(config);
   const client = new OpenRouterClient(apiKey, config.openrouter.baseUrl);
   const cwd = process.cwd();
-  const repoMap = await buildRepoMap(cwd, config.context.repoMapTokens).catch(() => "");
+
+  // Kick off the slow, independent startup work concurrently — file scan,
+  // MCP connect (network), and the project-guide read all overlap instead of
+  // serializing. Local memory/skill setup happens while they're in flight.
+  const mcp = new McpManager();
+  const repoMapP = buildRepoMap(cwd, config.context.repoMapTokens).catch(() => "");
+  const mcpReadyP = mcp.connectAll().catch(() => {});
+  const projectGuideP = Bun.file(join(cwd, ".persoje", "PERSOJE.md"))
+    .text()
+    .catch(() => "");
 
   // Memory: bounded index + lessons at session start; skills injected per turn.
   const facts = new FactStore(join(GLOBAL_CONFIG_DIR, "memory"));
@@ -188,13 +197,8 @@ async function main(): Promise<void> {
   // Personality: loaded from disk, controls agent behavior
   const personality = loadPersonality();
 
-  // MCP: connect to configured servers
-  const mcp = new McpManager();
-  await mcp.connectAll();
-  // Project guide written by /init — loaded whole (it's capped at ~60 lines).
-  const projectGuide = await Bun.file(join(cwd, ".persoje", "PERSOJE.md"))
-    .text()
-    .catch(() => "");
+  const [repoMap, projectGuide] = await Promise.all([repoMapP, projectGuideP]);
+  await mcpReadyP; // MCP tools must be connected before we build the registry
   const memoryContext = config.memory.enabled
     ? [
         projectGuide,
