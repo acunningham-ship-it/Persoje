@@ -19,15 +19,35 @@ export function Banner({
   const shortCwd = home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Text>
-        <Text color={theme.accent}>✳ </Text>
-        <Text bold>persoje </Text>
-        <Text dimColor>v{version}</Text>
-      </Text>
-      <Text dimColor>
-        {model} · router {routerState} · {shortCwd}
-      </Text>
-      <Text dimColor>/ for commands · esc to interrupt</Text>
+      {/* Contained welcome box — hugs content (alignSelf), not full terminal width. */}
+      <Box
+        borderStyle="round"
+        borderColor={theme.border}
+        paddingX={1}
+        flexDirection="column"
+        alignSelf="flex-start"
+      >
+        <Text>
+          <Text color={theme.accent} bold>
+            ✻
+          </Text>
+          <Text bold> Welcome to persoje</Text>
+          <Text dimColor> v{version}</Text>
+        </Text>
+        <Box marginTop={1}>
+          <Text dimColor>/help for commands · / for the menu · esc interrupts</Text>
+        </Box>
+        <Text dimColor>
+          {"  "}model {model}
+        </Text>
+        <Text dimColor>
+          {"  "}cwd {shortCwd} · router {routerState}
+        </Text>
+      </Box>
+      <Box marginTop={1} marginLeft={1}>
+        <Text color={theme.accent}>★ </Text>
+        <Text dimColor>token-efficient — every model runs lean here. Try a task, or /init this project.</Text>
+      </Box>
     </Box>
   );
 }
