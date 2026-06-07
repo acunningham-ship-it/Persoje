@@ -620,20 +620,23 @@ export function App({
             case "assistant":
               return (
                 <Box key={item.id} marginTop={1}>
-                  <Text>{renderMarkdown(item.text)}</Text>
+                  <Text color={theme.bullet}>⏺ </Text>
+                  <Box flexDirection="column">
+                    <Text>{renderMarkdown(item.text)}</Text>
+                  </Box>
                 </Box>
               );
             case "tool":
               return (
                 <Box key={item.id} flexDirection="column" marginTop={1}>
                   <Text>
-                    <Text color={item.isError ? theme.err : theme.accent}>⏺ </Text>
-                    <Text>{item.name}</Text>
+                    <Text color={theme.bullet}>⏺ </Text>
+                    <Text bold>{item.name}</Text>
                     <Text dimColor>({item.argsPreview})</Text>
                   </Text>
-                  <Text color={item.isError ? theme.err : "gray"}>
+                  <Text color={item.isError ? theme.err : theme.bullet}>
                     {"  ⎿ "}
-                    {item.note}
+                    <Text dimColor={!item.isError}>{item.note}</Text>
                   </Text>
                 </Box>
               );
@@ -667,7 +670,7 @@ export function App({
           <Box borderStyle="round" borderColor={busy ? theme.border : theme.accent} paddingX={1}>
             <Text color={theme.accent}>{"› "}</Text>
             {input ? <Text>{input}</Text> : <Text dimColor>{busy ? "type to queue…" : "task, or / for commands"}</Text>}
-            <Text color={theme.accent}>▋</Text>
+            <Text color={theme.accent}>▌</Text>
           </Box>
           {menuVisible ? (
             <CommandMenu items={menuItems} selected={menuSelected} />
