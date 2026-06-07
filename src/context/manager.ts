@@ -9,18 +9,30 @@ import { truncate } from "../tools/truncate.ts";
  */
 export class ContextManager {
   private messages: ChatMessage[] = [];
+  /** Persistence hook — the session store subscribes here. */
+  onAppend?: (msg: ChatMessage) => void;
 
   constructor(
     private budgetTokens: number,
     private compactionThreshold: number,
   ) {}
 
+  private push(msg: ChatMessage): void {
+    this.messages.push(msg);
+    this.onAppend?.(msg);
+  }
+
+  /** Restore history from a persisted session (does not fire onAppend). */
+  restore(messages: ChatMessage[]): void {
+    this.messages = [...messages];
+  }
+
   addUser(content: string): void {
-    this.messages.push({ role: "user", content });
+    this.push({ role: "user", content });
   }
 
   addAssistant(content: string, toolCalls?: ToolCallRequest[]): void {
-    this.messages.push({
+    this.push({
       role: "assistant",
       content,
       ...(toolCalls?.length
@@ -38,7 +50,7 @@ export class ContextManager {
   /** Tool results are truncated here — nothing oversized ever enters history. */
   addToolResult(toolCallId: string, result: string, maxTokens: number): { stored: string; truncated: boolean } {
     const { text, truncated } = truncate(result, maxTokens);
-    this.messages.push({ role: "tool", content: text, tool_call_id: toolCallId });
+    this.push({ role: "tool", content: text, tool_call_id: toolCallId });
     return { stored: text, truncated };
   }
 

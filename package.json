@@ -4,7 +4,9 @@
   "description": "Token-efficient agentic coding CLI for OpenRouter — lean harness, smart routing, weak-model guardrails",
   "type": "module",
   "private": true,
-  "bin": { "persoje": "src/cli.ts" },
+  "bin": {
+    "persoje": "src/cli.ts"
+  },
   "scripts": {
     "start": "bun run src/cli.ts",
     "test": "bun test",
@@ -12,10 +14,16 @@
   },
   "dependencies": {
     "chalk": "^5.3.0",
+    "ink": "^7.0.5",
+    "marked": "^18.0.5",
+    "marked-terminal": "^7.3.0",
+    "react": "^19.2.7",
     "zod": "^4"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/marked-terminal": "^6.1.1",
+    "@types/react": "^19.2.17"
   },
   "peerDependencies": {
     "typescript": "^5"

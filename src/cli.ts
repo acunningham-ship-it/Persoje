@@ -7,6 +7,7 @@ import { OpenRouterClient } from "./models/openrouter.ts";
 import { ToolRegistry } from "./tools/types.ts";
 import { readTool, writeTool, editTool, lsTool, globTool } from "./tools/file-tools.ts";
 import { bashTool, grepTool } from "./tools/shell-tools.ts";
+import { SessionStore } from "./session/store.ts";
 
 const VERSION = "0.1.0";
 
@@ -111,17 +112,46 @@ async function main(): Promise<void> {
 
   const apiKey = resolveApiKey(config);
   const client = new OpenRouterClient(apiKey, config.openrouter.baseUrl);
-  const agent = new Agent({ client, tools: buildRegistry(), config, cwd: process.cwd() });
+  const cwd = process.cwd();
+  const agent = new Agent({ client, tools: buildRegistry(), config, cwd });
 
-  // One-shot mode: persoje "do the thing"
-  const positional = args.filter((a, i) => !a.startsWith("-") && args[i - 1] !== "--model");
+  // One-shot mode: persoje "do the thing" (no persistence, auto-approve)
+  const flagsWithValue = new Set(["--model", "--resume"]);
+  const positional = args.filter((a, i) => !a.startsWith("-") && !flagsWithValue.has(args[i - 1] ?? ""));
   if (positional.length > 0) {
     await runTurn(agent, positional.join(" "));
     return;
   }
 
-  // Interactive REPL
-  console.log(chalk.bold(`persoje v${VERSION}`) + chalk.dim(` · ${config.model.primary} · ${process.cwd()}`));
+  // Interactive: Ink TUI by default, --plain for the bare REPL.
+  if (!args.includes("--plain") && process.stdout.isTTY) {
+    const store = new SessionStore();
+    const resumeIdx = args.indexOf("--resume");
+    let sessionId: string;
+    if (resumeIdx !== -1 && args[resumeIdx + 1]) {
+      sessionId = args[resumeIdx + 1]!;
+      const meta = store.get(sessionId);
+      if (!meta) {
+        console.error(chalk.red(`no session ${sessionId}`));
+        process.exit(1);
+      }
+      agent.context.restore(store.loadMessages(sessionId));
+    } else {
+      sessionId = store.create(cwd, config.model.primary);
+    }
+    agent.context.onAppend = (msg) => store.appendMessage(sessionId, msg);
+
+    const { render } = await import("ink");
+    const React = await import("react");
+    const { App } = await import("./tui/app.tsx");
+    const instance = render(React.createElement(App, { agent, store, sessionId, cwd }), { exitOnCtrlC: true });
+    await instance.waitUntilExit();
+    store.close();
+    return;
+  }
+
+  // Plain REPL
+  console.log(chalk.bold(`persoje v${VERSION}`) + chalk.dim(` · ${config.model.primary} · ${cwd}`));
   console.log(chalk.dim("type a request, /help for commands\n"));
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

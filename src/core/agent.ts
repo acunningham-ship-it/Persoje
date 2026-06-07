@@ -11,7 +11,15 @@ export interface AgentDeps {
   tools: ToolRegistry;
   config: PersojeConfig;
   cwd: string;
+  /**
+   * Approval hook for mutating tools (bash/write/edit). Return false to deny.
+   * Absent hook = auto-approve (plain REPL / one-shot mode).
+   */
+  approve?: (name: string, args: Record<string, unknown>) => Promise<boolean>;
 }
+
+/** Tools that can change the system — gated behind the approval hook. */
+const MUTATING_TOOLS = new Set(["bash", "write", "edit"]);
 
 /**
  * The agent loop. Pure core: no UI imports, communicates only via the
@@ -28,6 +36,11 @@ export class Agent {
       deps.config.context.budgetTokens,
       deps.config.context.compactionThreshold,
     );
+  }
+
+  /** Install/replace the approval hook after construction (the TUI does this). */
+  setApprover(approve: AgentDeps["approve"]): void {
+    this.deps.approve = approve;
   }
 
   get model(): string {
@@ -139,6 +152,16 @@ export class Agent {
     }
 
     yield { type: "tool-start", id: call.id, name: tool.name, args: parsed.data as Record<string, unknown> };
+
+    if (MUTATING_TOOLS.has(tool.name) && this.deps.approve) {
+      const ok = await this.deps.approve(tool.name, parsed.data as Record<string, unknown>);
+      if (!ok) {
+        const msg = "Denied by user. Ask before retrying this action, or try a different approach.";
+        this.context.addToolResult(call.id, msg, 100);
+        yield { type: "tool-result", id: call.id, name: tool.name, result: msg, isError: true, truncated: false, durationMs: 0 };
+        return;
+      }
+    }
 
     const ctx: ToolContext = { cwd, signal, bashTimeoutMs: config.loop.bashTimeoutMs };
     const cap = config.toolResultCaps[tool.name] ?? tool.maxResultTokens;
