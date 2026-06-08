@@ -27,8 +27,8 @@ describe("SkillLibrary", () => {
     lib.add("debug-react", "Debug a React component step by step", "1. Check props\n2. Check state\n3. Check effects");
     const skills = lib.list();
     expect(skills).toHaveLength(1);
-    expect(skills[0].name).toBe("debug-react");
-    expect(skills[0].description).toBe("Debug a React component step by step");
+    expect(skills[0]!.name).toBe("debug-react");
+    expect(skills[0]!.description).toBe("Debug a React component step by step");
   });
 
   it("catalog shows names and descriptions", () => {
@@ -77,7 +77,7 @@ describe("SkillLibrary", () => {
     lib.load("counted");
     const skills = lib.list();
     // Each load() calls recordUse(), incrementing useCount
-    expect(skills[0].useCount).toBeGreaterThanOrEqual(2);
+    expect(skills[0]!.useCount).toBeGreaterThanOrEqual(2);
   });
 
   it("prunes unused skills after threshold", () => {
@@ -100,7 +100,7 @@ describe("SkillLibrary", () => {
     lib.add("git-workflow", "Git branching strategy", "Feature branches, rebase, merge");
     const results = lib.search("react component debugging");
     expect(results.length).toBeGreaterThan(0);
-    expect(results[0].name).toBe("react-debug");
+    expect(results[0]!.name).toBe("react-debug");
   });
 
   it("injectFor returns skill content within token budget", () => {

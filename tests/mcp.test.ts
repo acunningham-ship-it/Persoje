@@ -31,7 +31,7 @@ describe("MCP config", () => {
     saveMcpConfig(config);
     const loaded = loadMcpConfig();
     expect(loaded.servers["test-server"]).toBeDefined();
-    expect(loaded.servers["test-server"].command).toBe("npx");
+    expect(loaded.servers["test-server"]!.command).toBe("npx");
     // Cleanup
     if (existsSync(MCP_TEST_PATH)) unlinkSync(MCP_TEST_PATH);
   });
