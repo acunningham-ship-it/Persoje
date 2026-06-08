@@ -4,9 +4,11 @@ A token-efficient agentic coding CLI for [OpenRouter](https://openrouter.ai). Po
 
 The premise: **a good harness makes a cheap model punch above its weight.** Heavier agents replay the whole conversation plus untruncated tool output and let context balloon before compacting. Persoje keeps a lean working set, so the same model runs at a fraction of the tokens per turn.
 
-![Context per turn: Hermes 17k–288k (median ~143k) vs Persoje 1k–25k (median ~12k)](docs/token-comparison.svg)
+![Context per turn: full-replay agent 17k–288k (median ~143k) vs Persoje 1k–25k (median ~12k)](docs/token-comparison.svg)
 
-> Same model (`openrouter/owl-alpha`), same coding tasks, measured from OpenRouter request logs. Both harnesses auto-compact — but Hermes lets context grow to ~280k before it does, so its turns sit at a median ~143k. Persoje keeps a bounded working set (goal + recent turns + summary, capped tool output, swap-to-disk transcript) and runs ~12× leaner per turn — its entire observed range sits below where Hermes even starts.
+> Same model, same coding tasks, from OpenRouter request logs against a conventional full-replay agent. Both auto-compact — but the conventional agent lets context grow to ~280k first (median ~143k/turn); Persoje keeps a bounded working set and runs ~12× leaner.
+>
+> For a **reproducible, apples-to-apples** number, [`bench/`](bench/) runs the *same* harness and model with Persoje's token discipline on vs off. Honest result: on tiny tasks it's a wash, but on work with large tool output it's **~2.4× leaner per turn with a 69% smaller peak**, and the gap widens with session length. The discipline earns its keep on real debugging, not three-turn toys.
 
 ```
 ❯ fix the failing test in calc.py

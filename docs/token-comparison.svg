@@ -13,13 +13,13 @@
   <rect width="840" height="430" rx="14" fill="#0f1115"/>
 
   <text x="40" y="50" fill="#f4f4f5" font-size="23" font-weight="700">Context size per turn</text>
-  <text x="40" y="76" fill="#9aa0a6" font-size="13.5">same model (openrouter/owl-alpha), same coding tasks · observed range with median ◆ · from OpenRouter logs</text>
+  <text x="40" y="76" fill="#9aa0a6" font-size="13.5">same model, same coding tasks · observed range with median ◆ · Persoje vs a conventional full-replay agent</text>
 
   <!-- scale 0..290k over x 200..780 -->
   <line x1="200" y1="110" x2="200" y2="300" stroke="#2a2d34" stroke-width="1"/>
 
   <!-- Hermes range bar 17k..288k, median ~143k -->
-  <text x="184" y="166" fill="#e8a8a8" font-size="15" text-anchor="end" font-weight="600">Hermes Agent</text>
+  <text x="184" y="166" fill="#e8a8a8" font-size="15" text-anchor="end" font-weight="600">Full-replay agent</text>
   <rect x="234" y="146" width="542" height="36" rx="6" fill="url(#hermes)" opacity="0.85"/>
   <polygon points="486,140 492,150 480,150" fill="#ffd2d2"/>
   <line x1="486" y1="146" x2="486" y2="182" stroke="#ffd2d2" stroke-width="2"/>
@@ -42,5 +42,5 @@
 
   <text x="40" y="372" fill="#e8a317" font-size="20" font-weight="700">≈ 12× leaner per turn</text>
   <text x="232" y="372" fill="#f4f4f5" font-size="15">median ~143k vs ~12k. Persoje's whole range sits below where Hermes even starts.</text>
-  <text x="40" y="400" fill="#5b6068" font-size="12">Both auto-compact — but Hermes lets context grow to ~280k first. Persoje keeps a lean working set: goal anchor + recent turns + summary, capped tool output, swap-to-disk transcript.</text>
+  <text x="40" y="400" fill="#5b6068" font-size="12">Conventional agents let context grow to ~280k before compacting. Persoje keeps a lean working set: goal anchor + recent turns + summary, capped tool output, swap-to-disk transcript. See bench/ for a reproducible lean-vs-naive measurement.</text>
 </svg>
