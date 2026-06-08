@@ -23,6 +23,7 @@ export const COMMANDS: CommandMeta[] = [
   { name: "/memory", args: "[slug]", desc: "list memory facts, or show one" },
   { name: "/skills", desc: "list skills in the library" },
   { name: "/lessons", desc: "recent lessons from failed turns" },
+  { name: "/stats", desc: "is self-improvement paying off? recall → outcome" },
   { name: "/quirks", desc: "known quirks of the current model" },
   { name: "/repomap", desc: "show the repo-map being sent to the model" },
   { name: "/dream", desc: "consolidate recent sessions into memory (free model)" },

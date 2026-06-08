@@ -237,23 +237,43 @@ export class SkillLibrary {
    * LAZY: only loads content for matched skills, not all.
    * Returns formatted markdown concatenation of top hits, or empty string.
    */
+  /** Names of skills injected into the most recent turn — confirmed as used only on success. */
+  private lastInjected: string[] = [];
+
   injectFor(taskText: string, maxTokens: number): string {
+    this.lastInjected = [];
     if (!taskText.trim()) return "";
 
     const results = this.search(taskText);
     if (results.length === 0) return "";
 
     let injected = "";
+    const names: string[] = [];
     for (const skill of results) {
       const skillContent = `## ${skill.name}\n${skill.description}\n\n${skill.content}`;
       const candidate = injected ? `${injected}\n\n${skillContent}` : skillContent;
       if (estimateTokens(candidate) <= maxTokens) {
         injected = candidate;
+        names.push(skill.name);
       } else {
         break;
       }
     }
+    this.lastInjected = names;
     return injected;
+  }
+
+  /**
+   * Confirm the skills injected last turn as actually useful — call this only
+   * when the turn succeeded. Ties useCount (and therefore pruning) to outcome,
+   * not just recall, so dead-weight skills get pruned and good ones stick.
+   * Returns the confirmed names.
+   */
+  confirmInjectedUsed(): string[] {
+    const names = this.lastInjected;
+    for (const n of names) this.recordUse(n);
+    this.lastInjected = [];
+    return names;
   }
 
   /** Parse metadata from a skill file. */

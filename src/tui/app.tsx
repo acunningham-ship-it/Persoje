@@ -153,6 +153,8 @@ export function App({
   const [queue, setQueue] = useState<string[]>([]);
   const [statusCost, setStatusCost] = useState(0);
   const [turnIterations, setTurnIterations] = useState(0);
+  const [turnsOk, setTurnsOk] = useState(0);
+  const [turnsFailed, setTurnsFailed] = useState(0);
   const [pickerSessions, setPickerSessions] = useState<import("../session/store.ts").SessionMeta[]>([]);
   const [pickerSelected, setPickerSelected] = useState(0);
   const [activeTheme, setActiveTheme] = useState<Theme>(() => getTheme((config as any).theme?.name ?? "amber"));
@@ -401,9 +403,17 @@ export function App({
               if (ev.reason === "max-iterations") push({ kind: "info", text: `stopped after ${ev.iterations} iterations` });
               if (ev.reason === "cancelled") push({ kind: "info", text: "turn cancelled" });
               setTurnIterations(0);
+              if (ev.reason === "done") {
+                // Success: confirm any recalled skills as actually useful (ties
+                // useCount/pruning to outcome) and count it toward effectiveness.
+                const used = skills.confirmInjectedUsed();
+                if (used.length) push({ kind: "info", text: `↑ used skill: ${used.join(", ")}` });
+                setTurnsOk((n) => n + 1);
+              }
               // Failed turns get a real reflexion lesson (not telemetry), plus a
               // model quirk if the model itself misbehaved. `persoje dream` curates later.
               if (ev.reason === "max-iterations" || ev.reason === "error") {
+                setTurnsFailed((n) => n + 1);
                 const problem =
                   ev.reason === "max-iterations"
                     ? `ran ${ev.iterations} iterations without finishing the task`
@@ -420,7 +430,7 @@ export function App({
         abortRef.current = null;
       }
     },
-    [agent, learnFromTurn, push, sessionId, store],
+    [agent, learnFromTurn, push, sessionId, store, skills],
   );
 
   const handleCommand = useCallback(
@@ -618,6 +628,26 @@ export function App({
               ? recent.map((l) => `[${l.model}] ${l.lesson} (${l.task.slice(0, 50)})`).join("\n")
               : "no lessons recorded yet",
           });
+          break;
+        }
+        case "/stats": {
+          // Is self-improvement actually paying off? Show recall → outcome.
+          const all = lessons.all();
+          const wins = all.filter((l) => l.error === "success").length;
+          const losses = all.length - wins;
+          const sk = skills.list().sort((a, b) => b.useCount - a.useCount);
+          const usedSkills = sk.filter((s) => s.useCount > 0);
+          const factCount = facts.index().split("\n").filter((l) => l.trim().startsWith("- [")).length;
+          const lines = [
+            `this session   ${turnsOk} ok · ${turnsFailed} failed`,
+            `memory         ${factCount} facts · ${all.length} lessons (${wins} worked / ${losses} from failures)`,
+            `skills         ${sk.length} total · ${usedSkills.length} have earned their keep`,
+          ];
+          if (sk.length) {
+            lines.push("");
+            for (const s of sk.slice(0, 8)) lines.push(`  ${s.useCount}× /${s.name}${s.useCount === 0 ? " (unused — prunes after 30d)" : ""}`);
+          }
+          push({ kind: "info", text: lines.join("\n") });
           break;
         }
         case "/quirks": {
