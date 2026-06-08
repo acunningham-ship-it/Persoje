@@ -20,6 +20,10 @@ forgivingly — and you can see every change it makes.
 - **Inline edit diffs.** Every edit shows a compact colored diff right under
   the tool row — built from the edit's own old/new strings, at zero token
   cost.
+- **`multi_edit`.** Several search/replace edits to one file in a single
+  atomic call (all succeed or nothing is written). Fewer round-trips than
+  separate `edit` calls, and a mid-sequence failure can't leave a half-edited
+  file. Shares the same exact-then-flexible matching as `edit`.
 - **`persoje -p` print mode.** Headless one-shot for scripts and pipes:
   prompt from args or stdin, only the final result on stdout, `--json` for a
   structured `{text,tools,tokens,cost}` object.

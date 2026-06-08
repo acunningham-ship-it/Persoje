@@ -7,7 +7,7 @@ import { Agent } from "./core/agent.ts";
 import { loadConfig, resolveApiKey, GLOBAL_CONFIG_DIR, GLOBAL_CONFIG_PATH } from "./config/config.ts";
 import { OpenRouterClient } from "./models/openrouter.ts";
 import { ToolRegistry } from "./tools/types.ts";
-import { readTool, writeTool, editTool, lsTool, globTool } from "./tools/file-tools.ts";
+import { readTool, writeTool, editTool, multiEditTool, lsTool, globTool } from "./tools/file-tools.ts";
 import { bashTool, grepTool } from "./tools/shell-tools.ts";
 import { webFetchTool, webSearchTool } from "./tools/web-tools.ts";
 import { SessionStore } from "./session/store.ts";
@@ -28,7 +28,7 @@ const VERSION = "0.4.0";
 
 function buildRegistry(skills: SkillLibrary, mcp?: McpManager): ToolRegistry {
   const registry = new ToolRegistry();
-  for (const t of [readTool, writeTool, editTool, lsTool, globTool, bashTool, grepTool, webFetchTool, webSearchTool]) registry.register(t);
+  for (const t of [readTool, writeTool, editTool, multiEditTool, lsTool, globTool, bashTool, grepTool, webFetchTool, webSearchTool]) registry.register(t);
   // Goal anchor + working plan + transcript escape-hatch
   registry.register(setGoalTool);
   registry.register(updateTodosTool);

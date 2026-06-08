@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { flexibleMatch, nearMatchHint } from "../src/tools/edit-match.ts";
+import { flexibleMatch, nearMatchHint, applyEdit } from "../src/tools/edit-match.ts";
 
 describe("flexibleMatch", () => {
   test("matches ignoring trailing whitespace, returns the real span", () => {
@@ -38,6 +38,33 @@ describe("flexibleMatch", () => {
     } else {
       throw new Error("expected a unique indentation match");
     }
+  });
+});
+
+describe("applyEdit", () => {
+  test("exact single replacement", () => {
+    const r = applyEdit("a\nb\nc", "b", "B");
+    expect(r).toEqual({ ok: true, content: "a\nB\nc", how: "exact", count: 1 });
+  });
+
+  test("replace_all counts every occurrence", () => {
+    const r = applyEdit("x x x", "x", "y", true);
+    expect(r.ok && r.content).toBe("y y y");
+    expect(r.ok && r.count).toBe(3);
+  });
+
+  test("refuses ambiguous exact match without replace_all", () => {
+    expect(applyEdit("x x", "x", "y")).toEqual({ ok: false, reason: "ambiguous-exact", count: 2 });
+  });
+
+  test("flexible match when exact fails", () => {
+    // old_string has indent the flat file lacks → no exact substring → falls back.
+    const r = applyEdit("return 1;\n", "    return 1;", "return 2;");
+    expect(r.ok && r.how).toBe("indentation");
+  });
+
+  test("reports missing when nothing matches", () => {
+    expect(applyEdit("nothing\n", "absent")).toEqual({ ok: false, reason: "missing", count: 0 });
   });
 });
 

@@ -171,7 +171,7 @@ src/
   models/      OpenRouter client (raw fetch + SSE, usage, retry, model catalog)
   router/      model profiles, escalation, first-use canary
   guardrails/  fuzzy names, text-rescue, loop detection, post-edit verify, danger guard
-  tools/       read/write/edit/bash/grep/glob/ls, web_fetch/web_search, set_goal, update_todos, transcript, task, skills
+  tools/       read/write/edit/multi_edit/bash/grep/glob/ls, web_fetch/web_search, set_goal, update_todos, transcript, task, skills
   memory/      facts, lessons, skills (BM25), dream consolidator
   mcp/         MCP client
   agents/      sub-agent spawner + pool

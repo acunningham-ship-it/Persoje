@@ -420,13 +420,23 @@ export function App({
               setBusyLabel(`${ev.name}(${preview})`);
               setTurnTools((n) => n + 1);
               // Track files the agent changed, for /undo.
-              if ((ev.name === "write" || ev.name === "edit") && typeof ev.args.path === "string") {
+              if ((ev.name === "write" || ev.name === "edit" || ev.name === "multi_edit") && typeof ev.args.path === "string") {
                 editedFilesRef.current.add(ev.args.path);
               }
               // Stash an inline diff for edits — rendered under the tool row,
               // never sent to the model (it already wrote the change).
               if (ev.name === "edit" && typeof ev.args.old_string === "string" && typeof ev.args.new_string === "string") {
                 toolDiffs.current.set(ev.id, editDiffLines(ev.args.old_string, ev.args.new_string));
+              } else if (ev.name === "multi_edit" && Array.isArray(ev.args.edits)) {
+                // Concatenate each edit's diff, separated by a faint rule.
+                const lines: DiffLine[] = [];
+                (ev.args.edits as Array<{ old_string?: unknown; new_string?: unknown }>).forEach((e, i) => {
+                  if (typeof e.old_string === "string" && typeof e.new_string === "string") {
+                    if (i > 0) lines.push({ sign: " ", text: "─" });
+                    lines.push(...editDiffLines(e.old_string, e.new_string, 6));
+                  }
+                });
+                if (lines.length) toolDiffs.current.set(ev.id, lines);
               }
               break;
             }

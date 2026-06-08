@@ -444,7 +444,7 @@ export class Agent {
 
       // Post-edit verification: don't let a weak model leave the file broken
       // and believe its own "done". The error goes straight back to the model.
-      if ((tool.name === "edit" || tool.name === "write") && typeof (parsed.data as any).path === "string") {
+      if ((tool.name === "edit" || tool.name === "write" || tool.name === "multi_edit") && typeof (parsed.data as any).path === "string") {
         const syntaxError = await postEditCheck(resolve(cwd, (parsed.data as any).path)).catch(() => null);
         if (syntaxError) {
           result += `\nWARNING — the file now has a syntax error. Fix it before proceeding:\n${syntaxError}`;

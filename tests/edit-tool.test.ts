@@ -2,7 +2,7 @@ import { test, expect, beforeEach } from "bun:test";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { editTool } from "../src/tools/file-tools.ts";
+import { editTool, multiEditTool } from "../src/tools/file-tools.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 
 let dir: string;
@@ -82,4 +82,53 @@ test("near-match hint points at the right line on a real miss", async () => {
   await expect(
     editTool.execute({ path: "h.ts", old_string: "const total = compute( );", new_string: "x" }, ctx),
   ).rejects.toThrow(/Nearest lines/);
+});
+
+test("multi_edit applies several edits in order, atomically", async () => {
+  writeFileSync(join(dir, "m.ts"), "let a = 1;\nlet b = 2;\nlet c = 3;\n");
+  const result = await multiEditTool.execute(
+    {
+      path: "m.ts",
+      edits: [
+        { old_string: "let a = 1;", new_string: "let a = 10;" },
+        { old_string: "let c = 3;", new_string: "let c = 30;" },
+      ],
+    },
+    ctx,
+  );
+  expect(result).toContain("2 edits applied");
+  expect(readFileSync(join(dir, "m.ts"), "utf-8")).toBe("let a = 10;\nlet b = 2;\nlet c = 30;\n");
+});
+
+test("multi_edit edits can build on each other", async () => {
+  writeFileSync(join(dir, "n.ts"), "value = 1;\n");
+  await multiEditTool.execute(
+    {
+      path: "n.ts",
+      edits: [
+        { old_string: "value = 1;", new_string: "value = 2;" },
+        { old_string: "value = 2;", new_string: "value = 3;" },
+      ],
+    },
+    ctx,
+  );
+  expect(readFileSync(join(dir, "n.ts"), "utf-8")).toBe("value = 3;\n");
+});
+
+test("multi_edit is atomic — a later failure writes nothing", async () => {
+  writeFileSync(join(dir, "o.ts"), "keep = 1;\n");
+  await expect(
+    multiEditTool.execute(
+      {
+        path: "o.ts",
+        edits: [
+          { old_string: "keep = 1;", new_string: "keep = 2;" },
+          { old_string: "does-not-exist", new_string: "x" },
+        ],
+      },
+      ctx,
+    ),
+  ).rejects.toThrow(/edit #2 of 2 failed \(no changes written\)/);
+  // File is untouched because edit #2 failed before any write.
+  expect(readFileSync(join(dir, "o.ts"), "utf-8")).toBe("keep = 1;\n");
 });

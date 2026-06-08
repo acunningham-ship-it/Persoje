@@ -81,7 +81,7 @@ export function assessDanger(name: string, args: Record<string, unknown>, cwd: s
     for (const [re, reason] of BASH_PATTERNS) if (re.test(cmd)) return { dangerous: true, reason };
     return SAFE;
   }
-  if (name === "write" || name === "edit") {
+  if (name === "write" || name === "edit" || name === "multi_edit") {
     const pd = pathDanger(String(args.path ?? ""), cwd);
     if (pd) return { dangerous: true, reason: pd };
   }

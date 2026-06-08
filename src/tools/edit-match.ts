@@ -65,6 +65,34 @@ export function flexibleMatch(content: string, oldStr: string): FlexMatch | "amb
   return null;
 }
 
+export type ApplyResult =
+  | { ok: true; content: string; how: MatchHow; count: number }
+  | { ok: false; reason: "missing" | "ambiguous-exact" | "ambiguous-flex"; count: number };
+
+/**
+ * Apply one search/replace to a string, with the same exact-then-flexible logic
+ * the edit tool uses. Pure: returns the new content or a structured failure, so
+ * both `edit` (one) and `multi_edit` (many, atomic) share exactly one code path.
+ * `count` is the exact-match occurrence count (for messaging).
+ */
+export function applyEdit(
+  content: string,
+  oldStr: string,
+  newStr: string,
+  replaceAll = false,
+): ApplyResult {
+  const count = content.split(oldStr).length - 1;
+  if (count > 1 && !replaceAll) return { ok: false, reason: "ambiguous-exact", count };
+  if (count >= 1) {
+    const updated = replaceAll ? content.split(oldStr).join(newStr) : content.replace(oldStr, newStr);
+    return { ok: true, content: updated, how: "exact", count: replaceAll ? count : 1 };
+  }
+  const flex = flexibleMatch(content, oldStr);
+  if (flex === "ambiguous") return { ok: false, reason: "ambiguous-flex", count: 0 };
+  if (flex) return { ok: true, content: content.replace(flex.original, newStr), how: flex.how, count: 1 };
+  return { ok: false, reason: "missing", count: 0 };
+}
+
 /**
  * Build a short "did you mean here?" hint when nothing matched at all: find the
  * content lines whose trimmed text equals the trimmed first/any line of the

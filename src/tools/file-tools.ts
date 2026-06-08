@@ -2,7 +2,45 @@ import { z } from "zod";
 import { resolve, dirname } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { ToolError, type Tool, type ToolContext } from "./types.ts";
-import { flexibleMatch, nearMatchHint } from "./edit-match.ts";
+import { applyEdit, nearMatchHint } from "./edit-match.ts";
+
+/**
+ * Apply one edit to in-memory content, translating a structured failure into a
+ * model-facing ToolError. Shared by `edit` and `multi_edit` so there's exactly
+ * one matching/messaging code path. Returns the new content + a short note;
+ * does NOT touch disk (the caller decides when to write — key to multi_edit's
+ * atomicity).
+ */
+function applyEditOrThrow(
+  content: string,
+  path: string,
+  old_string: string,
+  new_string: string,
+  replace_all?: boolean,
+): { content: string; note: string } {
+  if (old_string === new_string) throw new ToolError("old_string and new_string are identical");
+  const r = applyEdit(content, old_string, new_string, replace_all ?? false);
+  if (r.ok) {
+    const why =
+      r.how === "exact"
+        ? ""
+        : `; matched ignoring ${r.how === "trailing-space" ? "trailing whitespace" : "indentation"} (old_string wasn't exact)`;
+    return { content: r.content, note: `${r.count} replacement${r.count === 1 ? "" : "s"}${why}` };
+  }
+  if (r.reason === "ambiguous-exact") {
+    throw new ToolError(
+      `old_string matches ${r.count} times in ${path}. Add surrounding lines to make it unique, or set replace_all.`,
+    );
+  }
+  if (r.reason === "ambiguous-flex") {
+    throw new ToolError(
+      `old_string isn't exact, and a whitespace-tolerant match found several candidates in ${path}. Add surrounding lines to disambiguate, or copy the exact text including indentation.`,
+    );
+  }
+  throw new ToolError(
+    `old_string not found in ${path}. Read the file first and copy the exact text, including whitespace.${nearMatchHint(content, old_string)}`,
+  );
+}
 
 function resolveInCwd(path: string, ctx: ToolContext): string {
   return resolve(ctx.cwd, path);
@@ -62,46 +100,52 @@ export const editTool: Tool = {
     const abs = resolveInCwd(path, ctx);
     const file = Bun.file(abs);
     if (!(await file.exists())) throw new ToolError(`File not found: ${path}`);
-    if (old_string === new_string) throw new ToolError("old_string and new_string are identical");
     const content = await file.text();
+    const { content: updated, note } = applyEditOrThrow(content, path, old_string, new_string, replace_all);
+    await Bun.write(abs, updated);
+    return `Edited ${path} (${note})`;
+  },
+};
 
-    const count = content.split(old_string).length - 1;
-    if (count > 1 && !replace_all) {
-      throw new ToolError(
-        `old_string matches ${count} times in ${path}. Add surrounding lines to make it unique, or set replace_all.`,
-      );
-    }
+export const multiEditTool: Tool = {
+  name: "multi_edit",
+  description:
+    "Apply several search/replace edits to ONE file in order, atomically — all succeed or nothing is written. Each edit sees the result of the previous one. Use this instead of many separate edit calls to the same file.",
+  args: z.object({
+    path: z.string(),
+    edits: z
+      .array(
+        z.object({
+          old_string: z.string(),
+          new_string: z.string(),
+          replace_all: z.boolean().optional(),
+        }),
+      )
+      .min(1)
+      .describe("Edits applied in order; each sees the previous edit's result"),
+  }),
+  maxResultTokens: 300,
+  async execute({ path, edits }, ctx) {
+    const abs = resolveInCwd(path, ctx);
+    const file = Bun.file(abs);
+    if (!(await file.exists())) throw new ToolError(`File not found: ${path}`);
 
-    // Exact match: apply directly.
-    if (count >= 1) {
-      const updated = replace_all
-        ? content.split(old_string).join(new_string)
-        : content.replace(old_string, new_string);
-      await Bun.write(abs, updated);
-      const n = replace_all ? count : 1;
-      return `Edited ${path} (${n} replacement${n === 1 ? "" : "s"})`;
+    // Apply every edit to an in-memory copy first; only write if ALL succeed.
+    // A failure mid-sequence leaves the file untouched — no half-edited mess.
+    let content = await file.text();
+    const notes: string[] = [];
+    for (let i = 0; i < edits.length; i++) {
+      const e = edits[i]!;
+      try {
+        const r = applyEditOrThrow(content, path, e.old_string, e.new_string, e.replace_all);
+        content = r.content;
+        notes.push(r.note);
+      } catch (err) {
+        throw new ToolError(`edit #${i + 1} of ${edits.length} failed (no changes written): ${(err as Error).message}`);
+      }
     }
-
-    // No exact match. Fall back to a whitespace-tolerant line match, but only
-    // when it's unique — never guess. This rescues the most common weak-model
-    // miss (a dropped trailing space or off-by-a-bit indent) without a retry
-    // loop, and refuses rather than risk editing the wrong place.
-    const flex = flexibleMatch(content, old_string);
-    if (flex === "ambiguous") {
-      throw new ToolError(
-        `old_string isn't exact, and a whitespace-tolerant match found several candidates in ${path}. Add surrounding lines to disambiguate, or copy the exact text including indentation.`,
-      );
-    }
-    if (flex) {
-      const updated = content.replace(flex.original, new_string);
-      await Bun.write(abs, updated);
-      const why = flex.how === "trailing-space" ? "trailing whitespace" : "indentation";
-      return `Edited ${path} (1 replacement; matched ignoring ${why} — old_string wasn't exact)`;
-    }
-
-    throw new ToolError(
-      `old_string not found in ${path}. Read the file first and copy the exact text, including whitespace.${nearMatchHint(content, old_string)}`,
-    );
+    await Bun.write(abs, content);
+    return `Edited ${path} — ${edits.length} edits applied:\n${notes.map((n, i) => `  ${i + 1}. ${n}`).join("\n")}`;
   },
 };
 
