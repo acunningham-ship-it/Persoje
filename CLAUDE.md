@@ -1,106 +1,48 @@
+# CLAUDE.md — working on Persoje
 
-Default to using Bun instead of Node.js.
+Guidance for AI agents / contributors editing this repo. (User docs are in [README.md](README.md); the token benchmark is in [bench/](bench/).)
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+## What this is
 
-## APIs
+A token-efficient agentic coding CLI for OpenRouter. The thesis: a lean harness makes a cheap/weak model behave like a stronger one — via bounded context (goal anchor + recent turns + summary + swap-to-disk transcript), capped tool output, weak-model guardrails, and model routing. See the README for the full feature map.
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
+## Runtime: Bun (not Node)
 
-## Testing
+- `bun <file>`, `bun test`, `bun install`, `bun run <script>`, `bunx <pkg>` — never the npm/node equivalents.
+- `bun:sqlite` for the session store (not better-sqlite3). `Bun.spawn` for shell, `Bun.file`/`Bun.write` for I/O, `Bun.Glob` for globbing.
+- Bun auto-loads `.env`; don't add dotenv.
 
-Use `bun test` to run tests.
+## Commands
 
-```ts#index.test.ts
-import { test, expect } from "bun:test";
-
-test("hello world", () => {
-  expect(1).toBe(1);
-});
+```bash
+bun test                 # ~150 tests; uses a scripted fake client — no API key needed
+bunx tsc --noEmit        # typecheck (keep src clean; a few test-file strict-null warnings are known)
+bun run start            # run from source
+bun run compile          # → dist/persoje (standalone binary)
+bun run bench/run.ts --model <id>   # reproducible lean-vs-naive token benchmark
 ```
 
-## Frontend
+## Architecture
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
+UI-agnostic core emits a typed `AgentEvent` stream; the Ink TUI and the plain REPL are thin subscribers — nothing in `src/core` imports Ink. Layout:
 
-Server:
-
-```ts#index.ts
-import index from "./index.html"
-
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
+```
+core/       agent loop, events, prompt, tokens, personality, autonomous, updater
+context/    ContextManager (compaction/elision), repo-map, transcript
+models/     OpenRouter client (raw fetch + SSE, usage, retry, model catalog)
+router/     model profiles, escalation, first-use canary
+guardrails/ fuzzy names, text-rescue, loop detection, post-edit verify, danger guard
+tools/      read/write/edit/bash/grep/glob/ls, set_goal, transcript, task, skills
+memory/     facts, lessons, skills (BM25), dream consolidator
+agents/     sub-agent spawner + pool   ·   mcp/  MCP client   ·   session/  sqlite store
+tui/        Ink app, components, theme, commands, markdown   ·   setup/  first-run wizard
 ```
 
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
+## Conventions & guardrails
 
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
-```
-
-With the following `frontend.tsx`:
-
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
-
-// import .css files directly and it works
-import './index.css';
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
-
-```sh
-bun --hot ./index.ts
-```
-
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+- **Match the surrounding style** — `.ts` import extensions, comments that explain *why*, lean code.
+- **Add a test for new behavior** (`tests/`, against the fake client) and run `bun test` before committing.
+- The **danger guard** (`guardrails/danger.ts`) is a hard floor: never weaken or bypass it to make a feature pass — it's what keeps autonomous/yolo modes safe.
+- **Never commit secrets.** API keys come from `OPENROUTER_API_KEY` / config at runtime; nothing key-bearing is tracked. `.gitignore` covers `.env`, `dist/`, the binary, `.persoje/`, `*.db`.
+- Keep tool descriptions and the system prompt **token-lean** — they ride on every model call.
+- A running `persoje` auto-updates from `origin/main`; commit + push deliberately.
