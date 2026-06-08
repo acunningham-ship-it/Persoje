@@ -9,6 +9,8 @@ export interface ToolContext {
   setGoal?: (goal: string) => void;
   /** Path to the full session transcript .md (transcript tool reads it). */
   transcriptPath?: string;
+  /** Live progress (e.g. latest bash stdout line) — surfaced in the spinner. */
+  onProgress?: (line: string) => void;
 }
 
 export interface Tool<A = any> {

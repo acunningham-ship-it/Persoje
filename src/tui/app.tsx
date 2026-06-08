@@ -14,7 +14,7 @@ import type { FactStore } from "../memory/facts.ts";
 import type { SkillLibrary } from "../memory/skills.ts";
 import { runCanary, qualityFromScore } from "../router/canary.ts";
 import { renderMarkdown } from "./markdown.ts";
-import { COMMANDS, filterCommands, helpText } from "./commands.ts";
+import { COMMANDS, filterCommands, helpText, LIVE_SAFE } from "./commands.ts";
 import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar, AssistantBlock } from "./components.tsx";
 import { theme, getTheme, themeNames, type Theme } from "./theme.ts";
 import { loadPersonality, savePersonality, formatPersonality, PERSONALITY_OPTIONS, type Personality } from "../core/personality.ts";
@@ -213,7 +213,9 @@ export function App({
   const lastAssistantRef = useRef(""); // most recent assistant reply, for /copy
   const editedFilesRef = useRef(new Set<string>()); // files the agent wrote/edited, for /undo
 
-  const menuItems = !busy && !pending ? filterCommands(input) : [];
+  // The command menu is available even while a turn runs (so you can see and
+  // fire the read-only commands); only an approval prompt suppresses it.
+  const menuItems = !pending ? filterCommands(input) : [];
   const menuVisible = menuItems.length > 0;
 
   // Sync terminal title with session name
@@ -271,6 +273,11 @@ export function App({
   const saveHistory = (h: string[]) => {
     void Bun.write(HISTORY_PATH, JSON.stringify(h.slice(0, 100))).catch(() => {});
   };
+
+  // Live tool progress (e.g. bash stdout tail) → spinner label.
+  useEffect(() => {
+    agent.setToolProgress((name, line) => setBusyLabel(`${name}: ${line}`));
+  }, [agent]);
 
   // Approval hook. Danger always prompts (core flags it); otherwise the trust
   // level decides: yolo auto-runs everything, auto-edit auto-runs write/edit,
@@ -1070,6 +1077,17 @@ export function App({
       setHistory(newHistory);
       saveHistory(newHistory);
       if (busy) {
+        // Read-only commands run immediately mid-turn; everything else queues.
+        if (line.startsWith("/")) {
+          const cmd = line.split(/\s+/)[0]!;
+          if (LIVE_SAFE.has(cmd)) {
+            handleCommand(line);
+            return;
+          }
+          setQueue((q) => [...q, line]);
+          push({ kind: "info", text: `queued (runs after turn): ${cmd}` });
+          return;
+        }
         setQueue((q) => [...q, line]);
         push({ kind: "info", text: `queued: ${line.slice(0, 60)}` });
         return;

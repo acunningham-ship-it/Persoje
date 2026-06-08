@@ -45,6 +45,18 @@ export const COMMANDS: CommandMeta[] = [
   { name: "/exit", desc: "quit" },
 ];
 
+/**
+ * Commands safe to run WHILE a turn is in flight — read-only or flag-toggles
+ * that don't call the model, mutate the conversation, touch files, or spawn a
+ * turn. Everything else queues until the turn finishes.
+ */
+export const LIVE_SAFE = new Set<string>([
+  "/help", "/cost", "/status", "/config", "/permissions", "/sessions",
+  "/memory", "/skills", "/lessons", "/quirks", "/repomap", "/stats",
+  "/diff", "/copy", "/models", "/theme", "/effort", "/router", "/goal",
+  "/exit", "/quit",
+]);
+
 export function filterCommands(input: string): CommandMeta[] {
   const query = input.trim().toLowerCase();
   if (!query.startsWith("/")) return [];

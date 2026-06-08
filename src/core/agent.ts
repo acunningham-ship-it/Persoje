@@ -37,6 +37,8 @@ export interface AgentDeps {
   transcriptPath?: string;
   /** Fired when the model (or /goal) sets the goal — persisted by the session store. */
   onGoalSet?: (goal: string) => void;
+  /** Live tool progress (e.g. bash stdout tail) — the TUI shows it in the spinner. */
+  onToolProgress?: (name: string, line: string) => void;
 }
 
 /** Tools that can change the system — gated behind the approval hook. */
@@ -168,6 +170,11 @@ export class Agent {
   /** Install the guardrail-failure sink (the router subscribes through this). */
   setFailureSink(onFailure: AgentDeps["onFailure"]): void {
     this.deps.onFailure = onFailure;
+  }
+
+  /** Install the live tool-progress sink (the TUI shows it in the spinner). */
+  setToolProgress(onToolProgress: AgentDeps["onToolProgress"]): void {
+    this.deps.onToolProgress = onToolProgress;
   }
 
   get model(): string {
@@ -426,6 +433,7 @@ export class Agent {
         this.context.goal = g;
         this.deps.onGoalSet?.(g);
       },
+      onProgress: (line: string) => this.deps.onToolProgress?.(tool.name, line),
     };
     const cap = config.toolResultCaps[tool.name] ?? tool.maxResultTokens;
     try {

@@ -1,5 +1,9 @@
 import { marked } from "marked";
 import { markedTerminal } from "marked-terminal";
+// cli-highlight is used internally by marked-terminal for fenced code blocks
+// (gated on a color-capable TTY). Listed as a direct dep so it's bundled into
+// the compiled binary.
+import "cli-highlight";
 
 let configured = false;
 

@@ -21,8 +21,32 @@ export const bashTool: Tool = {
     const abort = () => proc.kill();
     ctx.signal?.addEventListener("abort", abort, { once: true });
     try {
+      // Stream stdout so the spinner can show the latest line on long commands,
+      // while accumulating the full text — the returned output is unchanged.
+      const readStdout = async (): Promise<string> => {
+        const reader = proc.stdout.getReader();
+        const dec = new TextDecoder();
+        let full = "";
+        let buf = "";
+        let lastReport = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = dec.decode(value, { stream: true });
+          full += chunk;
+          buf += chunk;
+          const parts = buf.split("\n");
+          buf = parts.pop() ?? "";
+          const line = parts.reverse().find((l) => l.trim());
+          if (line && ctx.onProgress && Date.now() - lastReport > 300) {
+            ctx.onProgress(line.trim().slice(0, 80));
+            lastReport = Date.now();
+          }
+        }
+        return full;
+      };
       const [stdout, stderr, exitCode] = await Promise.all([
-        new Response(proc.stdout).text(),
+        readStdout(),
         new Response(proc.stderr).text(),
         proc.exited,
       ]);

@@ -6,6 +6,7 @@
       "name": "persoje",
       "dependencies": {
         "chalk": "^5.3.0",
+        "cli-highlight": "^2.1.11",
         "ink": "^7.0.5",
         "marked": "^18.0.5",
         "marked-terminal": "^7.3.0",
