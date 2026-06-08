@@ -311,6 +311,11 @@ export class ContextManager {
     return this.cacheRatio >= 0.5;
   }
 
+  /** Fraction (0–1) of the last call's input tokens served from cache — for the status bar. */
+  get cacheHitRatio(): number {
+    return this.cacheRatio;
+  }
+
   /**
    * Best estimate of the REAL context size = the last call's actual input tokens
    * (which include the system prompt + tool schemas + true tokenization) plus the

@@ -157,8 +157,18 @@ export function resolveApiKey(config: PersojeConfig): string {
  * unlike `/model`, which only changes the running session.
  */
 export async function setDefaultModel(modelId: string): Promise<string> {
+  return setConfigValue("model", "primary", modelId);
+}
+
+/**
+ * Merge a single key into a nested config section (e.g. `theme.name`,
+ * `effort.level`), preserving every other key. Backs `/theme` and `/effort`
+ * so a chosen theme/effort survives across sessions. Trust level is
+ * deliberately NOT persisted — yolo must re-arm each session (safety).
+ */
+export async function setConfigValue(section: string, key: string, value: unknown): Promise<string> {
   const existing = (await readJsonIfExists(GLOBAL_CONFIG_PATH)) ?? {};
-  const model = { ...((existing.model as Record<string, unknown>) ?? {}), primary: modelId };
-  await Bun.write(GLOBAL_CONFIG_PATH, JSON.stringify({ ...existing, model }, null, 2) + "\n");
+  const merged = { ...((existing[section] as Record<string, unknown>) ?? {}), [key]: value };
+  await Bun.write(GLOBAL_CONFIG_PATH, JSON.stringify({ ...existing, [section]: merged }, null, 2) + "\n");
   return GLOBAL_CONFIG_PATH;
 }

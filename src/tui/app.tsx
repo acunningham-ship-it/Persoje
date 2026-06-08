@@ -8,7 +8,7 @@ import type { SessionStore } from "../session/store.ts";
 import type { Router, ProfileStore } from "../router/router.ts";
 import type { OpenRouterClient } from "../models/openrouter.ts";
 import type { PersojeConfig } from "../config/config.ts";
-import { setDefaultModel } from "../config/config.ts";
+import { setDefaultModel, setConfigValue } from "../config/config.ts";
 import type { LessonLog } from "../memory/lessons.ts";
 import type { FactStore } from "../memory/facts.ts";
 import type { SkillLibrary } from "../memory/skills.ts";
@@ -180,6 +180,7 @@ export function App({
   const [queue, setQueue] = useState<string[]>([]);
   const [statusCost, setStatusCost] = useState(0);
   const [turnIterations, setTurnIterations] = useState(0);
+  const [turnTools, setTurnTools] = useState(0);
   const [turnsOk, setTurnsOk] = useState(0);
   const [turnsFailed, setTurnsFailed] = useState(0);
   const [pickerSessions, setPickerSessions] = useState<import("../session/store.ts").SessionMeta[]>([]);
@@ -398,6 +399,9 @@ export function App({
       try {
         for await (const ev of agent.run(prompt, controller.signal)) {
           switch (ev.type) {
+            case "turn-start":
+              setTurnIterations(ev.turn); // real model rounds, distinct from tool count
+              break;
             case "text-delta":
               streamBuf.current += ev.delta;
               break;
@@ -411,7 +415,7 @@ export function App({
               const preview = compactArgs(ev.name, ev.args);
               toolArgs.current.set(ev.id, preview);
               setBusyLabel(`${ev.name}(${preview})`);
-              setTurnIterations((n) => n + 1);
+              setTurnTools((n) => n + 1);
               // Track files the agent changed, for /undo.
               if ((ev.name === "write" || ev.name === "edit") && typeof ev.args.path === "string") {
                 editedFilesRef.current.add(ev.args.path);
@@ -457,6 +461,7 @@ export function App({
               if (ev.reason === "max-iterations") push({ kind: "info", text: `stopped after ${ev.iterations} iterations` });
               if (ev.reason === "cancelled") push({ kind: "info", text: "turn cancelled" });
               setTurnIterations(0);
+              setTurnTools(0);
               if (ev.reason === "done") {
                 // Success: confirm any recalled skills as actually useful (ties
                 // useCount/pruning to outcome) and count it toward effectiveness.
@@ -860,7 +865,8 @@ export function App({
           // Adjust temperature with effort: low=0.1, mid=0.3, high=0.5, max=0.7
           const temps: Record<string, number> = { low: 0.1, mid: 0.3, high: 0.5, max: 0.7 };
           config.model.temperature = temps[level] ?? 0.3;
-          push({ kind: "info", text: `▸ effort → ${level} (temperature ${config.model.temperature})` });
+          void setConfigValue("effort", "level", level).catch(() => {});
+          push({ kind: "info", text: `▸ effort → ${level} (temperature ${config.model.temperature}, saved)` });
           break;
         }
         case "/plan": {
@@ -899,7 +905,8 @@ export function App({
           if (!(config as any).theme) (config as any).theme = {};
           (config as any).theme.name = name;
           setActiveTheme(getTheme(name));
-          push({ kind: "info", text: `▸ theme → ${name}` });
+          void setConfigValue("theme", "name", name).catch(() => {});
+          push({ kind: "info", text: `▸ theme → ${name} (saved)` });
           break;
         }
         case "/mcp": {
@@ -1299,6 +1306,8 @@ export function App({
               routerOff={!router.enabled}
               effort={(config as any).effort?.level ?? "mid"}
               iterations={turnIterations}
+              toolsThisTurn={turnTools}
+              cacheHit={agent.context.cacheHitRatio}
               planMode={(config as any).planMode ?? false}
               trust={trust}
               activeTheme={activeTheme}

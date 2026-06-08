@@ -150,6 +150,8 @@ export function StatusBar({
   planMode,
   trust,
   activeTheme,
+  cacheHit,
+  toolsThisTurn,
 }: {
   model: string;
   ctxUsed: number;
@@ -164,6 +166,10 @@ export function StatusBar({
   planMode?: boolean;
   trust?: string;
   activeTheme?: Theme;
+  /** Fraction (0–1) of last call's input served from cache. */
+  cacheHit?: number;
+  /** Tool calls made during the current turn. */
+  toolsThisTurn?: number;
 }): React.ReactElement {
   const t = activeTheme ?? theme;
   const [, force] = useState(0);
@@ -189,6 +195,9 @@ export function StatusBar({
       <Text dimColor>{fmtTok(ctxUsed)}/{fmtTok(ctxBudget)} </Text>
       <Text color={barColor}>[{bar}]</Text>
       <Text dimColor> {pct}%</Text>
+      {cacheHit && cacheHit > 0 ? (
+        <Text color={cacheHit >= 0.5 ? t.ok : t.dim}> ⚡{Math.round(cacheHit * 100)}%</Text>
+      ) : null}
       {sep}
       <Text dimColor>${cost < 0.01 ? cost.toFixed(5) : cost.toFixed(3)}</Text>
       {effort ? (
@@ -214,6 +223,7 @@ export function StatusBar({
           {sep}
           <Text color={t.accent}>⏱ {fmtSecs(Math.floor((Date.now() - turnStart) / 1000))}</Text>
           {iterations != null && iterations > 0 ? <Text dimColor> · iter {iterations}</Text> : null}
+          {toolsThisTurn != null && toolsThisTurn > 0 ? <Text dimColor> · {toolsThisTurn} tool{toolsThisTurn === 1 ? "" : "s"}</Text> : null}
         </>
       ) : null}
       {queued ? <Text dimColor> · {queued} queued</Text> : null}
