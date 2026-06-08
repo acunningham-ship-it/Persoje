@@ -28,6 +28,10 @@ forgivingly — and you can see every change it makes.
   prompt from args or stdin, only the final result on stdout, `--json` for a
   structured `{text,tools,tokens,cost}` object.
 
+- **Parallel tool calls.** When the model batches several read-only calls in
+  one turn (reads, greps, web fetches), they now run concurrently instead of
+  one-at-a-time — a real latency win. Any batch containing a write/edit/bash
+  stays strictly sequential, preserving the order the model intended.
 - **Cost ceiling.** `/budget <usd>` (or `loop.maxCostUsd`) sets a hard
   session spend cap; the turn halts before the next model call once it's hit —
   the safety net autonomous/long runs were missing. `/budget off` to disable.

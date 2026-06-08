@@ -13,6 +13,16 @@ import { postEditCheck } from "../guardrails/verify.ts";
 import { assessDanger } from "../guardrails/danger.ts";
 import { resolve } from "node:path";
 
+/**
+ * Tools with no side effects and no ordering constraints — safe to run
+ * concurrently when the model batches several in one turn. Anything that writes,
+ * edits, runs a shell command, or mutates session state is deliberately absent,
+ * so a batch containing one stays strictly sequential.
+ */
+const READONLY_TOOLS = new Set(["read", "grep", "glob", "ls", "web_fetch", "web_search", "transcript"]);
+/** Cap concurrency so a model can't fan out 30 simultaneous network fetches. */
+const MAX_PARALLEL_TOOLS = 8;
+
 export interface AgentDeps {
   client: OpenRouterClient;
   tools: ToolRegistry;
@@ -319,27 +329,58 @@ export class Agent {
 
         let anyOk = false;
         let anyErr = false;
-        for (const call of toolCalls) {
-          if (signal?.aborted) {
-            // The API requires a tool message for every tool_call id we stored.
-            this.context.addToolResult(call.id, "[cancelled by user]", 50);
-            continue;
-          }
-          // Loop guard: identical call repeating — refuse execution, tell the model.
+
+        // Per-call processing: loop-guard, then execute, draining the tool's
+        // event stream into an array so a batch can run concurrently while we
+        // still emit events in deterministic call order.
+        const processCall = async (call: ToolCallRequest): Promise<AgentEvent[]> => {
           if (loops.record(call.name, call.argsJson)) {
             const msg =
               "Loop detected: you've made this exact call repeatedly. The result will not change. " +
               "Try a different approach, or summarize what you have and stop.";
             this.context.addToolResult(call.id, msg, 100);
             this.deps.onFailure?.("loop", config.model.primary);
-            yield { type: "guardrail", kind: "loop", message: `${call.name} repeated — execution blocked` };
-            yield { type: "tool-result", id: call.id, name: call.name, result: msg, isError: true, truncated: false, durationMs: 0 };
-            anyErr = true;
-            continue;
+            return [
+              { type: "guardrail", kind: "loop", message: `${call.name} repeated — execution blocked` },
+              { type: "tool-result", id: call.id, name: call.name, result: msg, isError: true, truncated: false, durationMs: 0 },
+            ];
           }
-          for await (const ev of this.executeToolCall(call, signal)) {
-            if (ev.type === "tool-result") ev.isError ? (anyErr = true) : (anyOk = true);
-            yield ev;
+          const evs: AgentEvent[] = [];
+          for await (const ev of this.executeToolCall(call, signal)) evs.push(ev);
+          return evs;
+        };
+
+        const emit = function* (batches: AgentEvent[][]): Generator<AgentEvent> {
+          for (const evs of batches) {
+            for (const ev of evs) {
+              if (ev.type === "tool-result") ev.isError ? (anyErr = true) : (anyOk = true);
+              yield ev;
+            }
+          }
+        };
+
+        if (signal?.aborted) {
+          // The API requires a tool message for every tool_call id we stored.
+          for (const call of toolCalls) this.context.addToolResult(call.id, "[cancelled by user]", 50);
+        } else if (
+          toolCalls.length > 1 &&
+          toolCalls.length <= MAX_PARALLEL_TOOLS &&
+          toolCalls.every((c) => READONLY_TOOLS.has(c.name))
+        ) {
+          // Independent read-only calls (the model batched several reads/searches)
+          // — run them concurrently, then emit in call order. No side effects, so
+          // ordering is irrelevant to correctness and we save the round-trip latency.
+          const batches = await Promise.all(toolCalls.map((c) => processCall(c)));
+          yield* emit(batches);
+        } else {
+          // Anything that mutates (write/edit/bash/…) stays strictly sequential,
+          // preserving the order the model intended (e.g. edit then run the test).
+          for (const call of toolCalls) {
+            if (signal?.aborted) {
+              this.context.addToolResult(call.id, "[cancelled by user]", 50);
+              continue;
+            }
+            yield* emit([await processCall(call)]);
           }
         }
 

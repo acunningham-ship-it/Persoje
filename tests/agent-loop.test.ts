@@ -72,6 +72,86 @@ test("executes a tool call then continues to completion", async () => {
   expect(toolMsg?.tool_call_id).toBe("c1");
 });
 
+test("batched read-only tool calls run concurrently", async () => {
+  // Two slow read-only tools (names in the parallel allowlist). If they ran
+  // sequentially the turn would take ~200ms; concurrently it's ~100ms.
+  const slow = (name: string) =>
+    ({
+      name,
+      description: "slow read-only",
+      args: z.object({}),
+      maxResultTokens: 50,
+      execute: async () => {
+        await new Promise((r) => setTimeout(r, 100));
+        return "done";
+      },
+    }) as any;
+  const registry = new ToolRegistry();
+  registry.register(slow("grep"));
+  registry.register(slow("glob"));
+  const client = fakeClient([
+    [
+      {
+        type: "tool-calls",
+        calls: [
+          { id: "a", name: "grep", argsJson: "{}" },
+          { id: "b", name: "glob", argsJson: "{}" },
+        ],
+      },
+      usage,
+    ],
+    [{ type: "text", delta: "done" }, usage],
+  ]);
+  const agent = new Agent({ client, tools: registry, config: makeConfig(), cwd: "/tmp" });
+  const start = performance.now();
+  const events = await collect(agent.run("search two ways"));
+  const elapsed = performance.now() - start;
+
+  const results = events.filter((e) => e.type === "tool-result");
+  expect(results).toHaveLength(2);
+  expect(elapsed).toBeLessThan(180); // would be ~200ms+ if sequential
+});
+
+test("a mutating call in the batch forces sequential execution", async () => {
+  // grep (read-only) + a slow write: must NOT parallelize. Each ~80ms → ~160ms.
+  const order: string[] = [];
+  const slow = (name: string) =>
+    ({
+      name,
+      description: "slow",
+      args: z.object({}),
+      maxResultTokens: 50,
+      execute: async () => {
+        await new Promise((r) => setTimeout(r, 80));
+        order.push(name);
+        return "ok";
+      },
+    }) as any;
+  const registry = new ToolRegistry();
+  registry.register(slow("grep"));
+  registry.register(slow("write"));
+  const client = fakeClient([
+    [
+      {
+        type: "tool-calls",
+        calls: [
+          { id: "a", name: "grep", argsJson: "{}" },
+          { id: "b", name: "write", argsJson: "{}" },
+        ],
+      },
+      usage,
+    ],
+    [{ type: "text", delta: "done" }, usage],
+  ]);
+  const agent = new Agent({ client, tools: registry, config: makeConfig(), cwd: "/tmp" });
+  const start = performance.now();
+  await collect(agent.run("read then write"));
+  const elapsed = performance.now() - start;
+
+  expect(order).toEqual(["grep", "write"]); // model's order preserved
+  expect(elapsed).toBeGreaterThan(150); // sequential, not overlapped
+});
+
 test("cost ceiling halts the turn before the next model call", async () => {
   const registry = new ToolRegistry();
   registry.register(readTool);
