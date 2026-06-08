@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useInput } from "ink";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { truncate } from "../tools/truncate.ts";
 import type { Agent } from "../core/agent.ts";
 import type { SessionStore } from "../session/store.ts";
 import type { Router, ProfileStore } from "../router/router.ts";
@@ -121,6 +122,25 @@ function compactArgs(name: string, args: Record<string, unknown>): string {
 
 let nextId = 1;
 
+/** Expand `@path` mentions in a prompt by inlining the (truncated) file contents. */
+async function expandFileRefs(text: string, cwd: string): Promise<string> {
+  const refs = [...new Set([...text.matchAll(/(?:^|\s)@([^\s]+)/g)].map((m) => m[1]!))];
+  if (refs.length === 0) return text;
+  let appended = "";
+  for (const ref of refs) {
+    try {
+      const f = Bun.file(resolve(cwd, ref.replace(/^~/, homedir())));
+      if (await f.exists()) {
+        const { text: clipped } = truncate(await f.text(), 2000);
+        appended += `\n\n[@${ref}]\n${clipped}`;
+      }
+    } catch {
+      /* unreadable — leave the literal @ref in the prompt */
+    }
+  }
+  return appended ? text + appended : text;
+}
+
 export function App({
   agent,
   store,
@@ -201,6 +221,16 @@ export function App({
   // the terminal shrinks (the old, wider frame wraps and throws off its line
   // count), leaving stacked ghost boxes. Debounced clear-screen + remount fixes
   // it — the debounce means a drag-resize only repaints once it settles.
+  // Bracketed paste: ask the terminal to wrap pasted text in markers so a
+  // multi-line paste arrives as one chunk instead of a flurry of Enter presses.
+  useEffect(() => {
+    if (!process.stdout.isTTY) return;
+    process.stdout.write("\x1b[?2004h");
+    return () => {
+      process.stdout.write("\x1b[?2004l");
+    };
+  }, []);
+
   const [resizeNonce, setResizeNonce] = useState(0);
   useEffect(() => {
     if (!process.stdout.isTTY) return;
@@ -347,8 +377,11 @@ export function App({
       const controller = new AbortController();
       abortRef.current = controller;
 
+      // Inline @file references (display showed the original task above).
+      const prompt = await expandFileRefs(task, cwd);
+
       try {
-        for await (const ev of agent.run(task, controller.signal)) {
+        for await (const ev of agent.run(prompt, controller.signal)) {
           switch (ev.type) {
             case "text-delta":
               streamBuf.current += ev.delta;
@@ -957,6 +990,16 @@ export function App({
     }
 
     if (key.return) {
+      // Option/Alt+Enter, or a trailing backslash, inserts a newline instead of
+      // submitting — so you can write multi-line prompts.
+      if (key.meta) {
+        setInput((v) => v + "\n");
+        return;
+      }
+      if (input.endsWith("\\")) {
+        setInput((v) => v.slice(0, -1) + "\n");
+        return;
+      }
       // Menu: enter completes (and runs no-arg commands immediately).
       if (menuVisible) {
         const chosen = menuItems[Math.min(menuSelected, menuItems.length - 1)]!;
@@ -1007,16 +1050,15 @@ export function App({
       return;
     }
     if (char && !key.ctrl && !key.meta) {
-      // Pasted/piped text can contain newlines that never arrive as key.return —
-      // treat the first newline as submission and keep the remainder typed.
-      if (char.includes("\n") || char.includes("\r")) {
-        const norm = char.replace(/\r\n?/g, "\n");
-        const nl = norm.indexOf("\n");
-        const line = input + norm.slice(0, nl);
-        setInput(norm.slice(nl + 1));
-        submit(line);
+      // Strip bracketed-paste markers. A chunk that still contains newlines is a
+      // multi-line paste — insert it whole (preserving the newlines) rather than
+      // submitting line-by-line, which used to mangle pasted code.
+      const cleaned = char.replace(/\x1b\[20[01]~/g, "");
+      if (!cleaned) return;
+      if (cleaned.includes("\n") || cleaned.includes("\r")) {
+        setInput((v) => v + cleaned.replace(/\r\n?/g, "\n"));
       } else {
-        setInput((v) => v + char);
+        setInput((v) => v + cleaned);
         setMenuSelected(0);
       }
     }
