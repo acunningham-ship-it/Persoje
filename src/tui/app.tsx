@@ -16,6 +16,7 @@ import { runCanary, qualityFromScore } from "../router/canary.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { COMMANDS, filterCommands, helpText, LIVE_SAFE } from "./commands.ts";
 import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar, AssistantBlock, TodoList } from "./components.tsx";
+import { editDiffLines, type DiffLine } from "./diff.ts";
 import { theme, getTheme, themeNames, type Theme } from "./theme.ts";
 import { loadPersonality, savePersonality, formatPersonality, PERSONALITY_OPTIONS, type Personality } from "../core/personality.ts";
 import type { McpManager } from "../mcp/client.ts";
@@ -38,7 +39,7 @@ const HISTORY_PATH = join(homedir(), ".config", "persoje", "history.json");
 type DisplayItem =
   | { kind: "user"; id: number; text: string }
   | { kind: "assistant"; id: number; text: string }
-  | { kind: "tool"; id: number; name: string; argsPreview: string; note: string; isError: boolean }
+  | { kind: "tool"; id: number; name: string; argsPreview: string; note: string; isError: boolean; diff?: DiffLine[] }
   | { kind: "info"; id: number; text: string }
   | { kind: "error"; id: number; text: string };
 
@@ -211,6 +212,7 @@ export function App({
   const alwaysAllow = useRef(new Set<string>());
   const streamBuf = useRef("");
   const toolArgs = useRef(new Map<string, string>()); // call id → args preview
+  const toolDiffs = useRef(new Map<string, DiffLine[]>()); // call id → inline edit diff
   const lastTaskRef = useRef(""); // most recent user task, for /good /bad /retry
   const lastAssistantRef = useRef(""); // most recent assistant reply, for /copy
   const editedFilesRef = useRef(new Set<string>()); // files the agent wrote/edited, for /undo
@@ -421,11 +423,18 @@ export function App({
               if ((ev.name === "write" || ev.name === "edit") && typeof ev.args.path === "string") {
                 editedFilesRef.current.add(ev.args.path);
               }
+              // Stash an inline diff for edits — rendered under the tool row,
+              // never sent to the model (it already wrote the change).
+              if (ev.name === "edit" && typeof ev.args.old_string === "string" && typeof ev.args.new_string === "string") {
+                toolDiffs.current.set(ev.id, editDiffLines(ev.args.old_string, ev.args.new_string));
+              }
               break;
             }
             case "tool-result": {
               setBusyLabel("thinking");
               const lines = ev.result.split("\n").length;
+              const diff = !ev.isError ? toolDiffs.current.get(ev.id) : undefined;
+              toolDiffs.current.delete(ev.id);
               push({
                 kind: "tool",
                 name: ev.name,
@@ -434,6 +443,7 @@ export function App({
                   ? ev.result.split("\n")[0]!.slice(0, 110)
                   : `${lines} line${lines === 1 ? "" : "s"}${ev.truncated ? " (truncated)" : ""} · ${ev.durationMs}ms`,
                 isError: ev.isError,
+                diff,
               });
               break;
             }
@@ -1241,12 +1251,28 @@ export function App({
                   <Text color={activeTheme.err}>    ⌐ {item.note}</Text>
                 </Box>
               ) : (
-                <Box key={item.id} marginTop={1}>
-                  <Text dimColor>  │ </Text>
-                  <Text color={activeTheme.accent}>{TOOL_ICON[item.name] ?? "▸"} </Text>
-                  <Text>{item.name}</Text>
-                  <Text dimColor>({item.argsPreview}) </Text>
-                  <Text dimColor>· {item.note}</Text>
+                <Box key={item.id} flexDirection="column" marginTop={1}>
+                  <Box>
+                    <Text dimColor>  │ </Text>
+                    <Text color={activeTheme.accent}>{TOOL_ICON[item.name] ?? "▸"} </Text>
+                    <Text>{item.name}</Text>
+                    <Text dimColor>({item.argsPreview}) </Text>
+                    <Text dimColor>· {item.note}</Text>
+                  </Box>
+                  {item.diff && item.diff.length > 0
+                    ? item.diff.map((d, di) => (
+                        <Text
+                          key={di}
+                          color={d.sign === "+" ? activeTheme.ok : d.sign === "-" ? activeTheme.err : undefined}
+                          dimColor={d.sign === " "}
+                        >
+                          {"      "}
+                          {d.sign}
+                          {d.sign === " " ? "" : " "}
+                          {d.text}
+                        </Text>
+                      ))
+                    : null}
                 </Box>
               );
             case "info":
