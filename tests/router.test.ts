@@ -34,20 +34,20 @@ describe("seedProfile heuristics", () => {
     expect(p3.toolQuality).toBe("good");
   });
 
-  test("free-tier and openrouter models get variable/none", () => {
+  test("free-tier and openrouter models get variable quality, caching assumed", () => {
     const p1 = seedProfile("something:free");
     expect(p1.toolQuality).toBe("variable");
-    expect(p1.cachingMode).toBe("none");
+    expect(p1.cachingMode).toBe("automatic"); // owl-alpha & friends cache; runtime confirms
 
     const p2 = seedProfile("openrouter/auto");
     expect(p2.toolQuality).toBe("variable");
-    expect(p2.cachingMode).toBe("none");
+    expect(p2.cachingMode).toBe("automatic");
   });
 
-  test("unknown models default to unknown/none", () => {
+  test("unknown models default to unknown quality, caching assumed", () => {
     const p = seedProfile("unknown-provider/unknown-model");
     expect(p.toolQuality).toBe("unknown");
-    expect(p.cachingMode).toBe("none");
+    expect(p.cachingMode).toBe("automatic");
   });
 });
 

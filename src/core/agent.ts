@@ -235,6 +235,7 @@ export class Agent {
             toolCalls = ev.calls;
           } else if (ev.type === "usage") {
             this.accounting.record(ev.usage);
+            this.context.recordActualInput(ev.usage.inputTokens, ev.usage.cachedTokens); // calibrate gauge + compaction (and detect caching)
             yield { type: "usage", usage: ev.usage };
           } else if (ev.type === "retry") {
             yield { type: "retry", attempt: ev.attempt, maxRetries: ev.maxRetries, delayMs: ev.delayMs, reason: ev.reason };

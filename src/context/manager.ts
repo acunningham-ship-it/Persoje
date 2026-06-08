@@ -52,6 +52,13 @@ export class ContextManager {
   private velocity = 0;
   /** Token count at last build — used for diff detection. */
   private lastBuildTokens = 0;
+  /** Real input tokens from OpenRouter on the last call, and our message-estimate
+   *  at that moment — together they calibrate estimateTokensUsed (which ignores
+   *  the system prompt + tool schemas, ~15-25k that's sent every call). */
+  private lastInputTokens = 0;
+  private estimateAtLastInput = 0;
+  /** Fraction of the last call's input served from cache (0 = no caching). */
+  private cacheRatio = 0;
   /** Message count at last build — used for prefix stability detection. */
   private lastBuildMessageCount = 0;
   /** Number of messages elided in the last build. */
@@ -239,7 +246,7 @@ export class ContextManager {
    * Returns both the elided messages and a count of how many were elided.
    */
   private elideByPriority(): { messages: ChatMessage[]; elidedCount: number } {
-    const totalTokens = this.estimateTokensUsed();
+    const totalTokens = this.effectiveTokens(); // real size incl. fixed overhead
     // Only elide if we're past 60% of budget — no point trimming early
     if (totalTokens < this.budgetTokens * 0.6) return { messages: this.messages, elidedCount: 0 };
 
@@ -291,13 +298,39 @@ export class ContextManager {
     return total;
   }
 
+  /** Record the real input-token count (and cache hits) OpenRouter reported. */
+  recordActualInput(tokens: number, cachedTokens = 0): void {
+    if (tokens <= 0) return;
+    this.lastInputTokens = tokens;
+    this.estimateAtLastInput = this.estimateTokensUsed();
+    this.cacheRatio = cachedTokens > 0 ? Math.min(1, cachedTokens / tokens) : 0;
+  }
+
+  /** True when the provider is caching the prefix well — replaying history is cheap. */
+  cachingWell(): boolean {
+    return this.cacheRatio >= 0.5;
+  }
+
+  /**
+   * Best estimate of the REAL context size = the last call's actual input tokens
+   * (which include the system prompt + tool schemas + true tokenization) plus the
+   * estimated growth from messages added since. Falls back to the rough estimate
+   * before the first call. This is what the gauge and compaction should use —
+   * estimateTokensUsed alone undercounts by the fixed overhead, ~2-3x low.
+   */
+  effectiveTokens(): number {
+    if (this.lastInputTokens === 0) return this.estimateTokensUsed();
+    const growth = Math.max(0, this.estimateTokensUsed() - this.estimateAtLastInput);
+    return this.lastInputTokens + growth;
+  }
+
   /**
    * Adaptive compaction check: instead of a fixed threshold, we consider
    * context velocity. If context is growing fast (deep agentic loop),
    * compact earlier to avoid running out of room mid-turn.
    */
   needsCompaction(): boolean {
-    const used = this.estimateTokensUsed();
+    const used = this.effectiveTokens(); // real size incl. system prompt + tool schemas
     const ratio = used / this.budgetTokens;
 
     // Update velocity estimate
@@ -310,10 +343,13 @@ export class ContextManager {
     const dynamicThreshold = velocityRatio > 0.05 ? 0.6 : this.compactionThreshold;
     if (ratio > dynamicThreshold) return true;
 
-    // Turn-count trigger: once we're more than keepFullTurns(+2) real user turns
-    // deep, fold the older turns into the summary even if we're under the token
-    // budget — so we stop replaying the whole transcript every turn (the original
-    // "goal + recent + summary" design). Full detail stays on disk via `transcript`.
+    // Turn-count trigger: fold older turns into the summary once we're a few turns
+    // deep, so we don't replay the whole transcript every turn. BUT skip this when
+    // the provider is caching the prefix well (e.g. owl-alpha) — there, replaying
+    // history is a cheap, fast cache read, while compacting would invalidate the
+    // cache AND cost a summary call. Let it ride; the token-budget trigger above
+    // still protects against actually approaching the window.
+    if (this.cachingWell()) return false;
     const userTurns = this.messages.filter(
       (m) => m.role === "user" && !m.content.startsWith("[Summary of earlier conversation]"),
     ).length;

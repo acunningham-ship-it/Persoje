@@ -71,12 +71,14 @@ export function seedProfile(modelId: string): ModelProfile {
       quirks: [],
     };
   }
-  // Free-tier or stealth/cloaked models: variable quality
+  // Free-tier or stealth/cloaked models: variable quality. Caching can't be told
+  // from the id (owl-alpha caches well, ~90% hit rate) — assume it, send cache
+  // breakpoints, and let runtime cache-hit detection be authoritative.
   if (modelId.endsWith(":free") || modelId.startsWith("openrouter/")) {
     return {
       id: modelId,
       toolQuality: "variable",
-      cachingMode: "none",
+      cachingMode: "automatic",
       quirks: [],
     };
   }
@@ -84,7 +86,7 @@ export function seedProfile(modelId: string): ModelProfile {
   return {
     id: modelId,
     toolQuality: "unknown",
-    cachingMode: "none",
+    cachingMode: "automatic",
     quirks: [],
   };
 }

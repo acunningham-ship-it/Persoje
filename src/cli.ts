@@ -30,10 +30,14 @@ function buildRegistry(skills: SkillLibrary, mcp?: McpManager): ToolRegistry {
   // Goal anchor + transcript escape-hatch
   registry.register(setGoalTool);
   registry.register(transcriptTool);
-  // Self-learning skill tools
+  // Self-learning skill tools. add_skill is always available (so it can create
+  // the first one); invoke/list only matter once skills exist — gate them to
+  // save tool-schema tokens on every call when the library is empty.
   registry.register(makeAddSkillTool(skills));
-  registry.register(makeInvokeSkillTool(skills));
-  registry.register(makeListSkillsTool(skills));
+  if (skills.list().length > 0) {
+    registry.register(makeInvokeSkillTool(skills));
+    registry.register(makeListSkillsTool(skills));
+  }
   // MCP tools
   if (mcp) {
     for (const tool of mcp.getTools()) registry.register(tool);

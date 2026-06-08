@@ -1112,7 +1112,7 @@ export function App({
           ) : (
             <StatusBar
               model={agent.model}
-              ctxUsed={agent.context.estimateTokensUsed()}
+              ctxUsed={agent.context.effectiveTokens()}
               ctxBudget={modelWindows.get(agent.model) ?? config.context.budgetTokens}
               cost={statusCost}
               busy={busy}

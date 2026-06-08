@@ -23,6 +23,27 @@ export interface Tool<A = any> {
 
 export class ToolError extends Error {}
 
+/**
+ * Drop JSON-schema keywords the model doesn't need but that ride on every call:
+ * the `$schema` dialect URL (~15 tok/tool) and `additionalProperties`. Pure
+ * token savings, zero effect on how the model reads the tool.
+ */
+function stripSchemaNoise(schema: Record<string, unknown>): Record<string, unknown> {
+  const clean = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(clean);
+    if (node && typeof node === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+        if (k === "$schema" || k === "additionalProperties") continue;
+        out[k] = clean(v);
+      }
+      return out;
+    }
+    return node;
+  };
+  return clean(schema) as Record<string, unknown>;
+}
+
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
 
@@ -59,7 +80,7 @@ export class ToolRegistry {
       function: {
         name: t.name,
         description: t.description,
-        parameters: z.toJSONSchema(t.args),
+        parameters: stripSchemaNoise(z.toJSONSchema(t.args)),
       },
     }));
   }
