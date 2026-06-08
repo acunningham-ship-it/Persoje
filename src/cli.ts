@@ -22,7 +22,7 @@ import { makeAddSkillTool, makeInvokeSkillTool, makeListSkillsTool } from "./too
 import { McpManager } from "./mcp/client.ts";
 import { loadPersonality } from "./core/personality.ts";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 function buildRegistry(skills: SkillLibrary, mcp?: McpManager): ToolRegistry {
   const registry = new ToolRegistry();
