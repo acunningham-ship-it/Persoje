@@ -1,6 +1,6 @@
 {
   "name": "persoje",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Token-efficient agentic coding CLI for OpenRouter — lean harness, smart routing, weak-model guardrails",
   "type": "module",
   "private": true,

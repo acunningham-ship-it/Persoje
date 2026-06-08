@@ -1,102 +1,184 @@
 # Persoje
 
-A token-efficient agentic coding CLI for [OpenRouter](https://openrouter.ai) — run *any* model
-(free stealth previews, small open models, frontier) inside a harness that keeps them honest
-and keeps your context lean.
+A token-efficient agentic coding CLI for [OpenRouter](https://openrouter.ai). Point it at *any* model — a free stealth preview, a small open model, or a frontier one — and a lean harness keeps it honest and keeps your context small.
 
-**The thesis:** a lean harness makes cheap models punch up. Hermes-style agents send 200k+
-tokens per turn; Persoje runs the same models at 1–2k tokens per call.
+The premise: **a good harness makes a cheap model punch above its weight.** Naive agents (Hermes-style) replay the entire conversation plus untruncated tool output on every turn and burn 150k+ tokens a turn. Persoje runs the same model at a fraction of that.
+
+![Tokens per turn: Hermes ~144k vs Persoje ~15k](docs/token-comparison.svg)
+
+> Same model (`openrouter/owl-alpha`), same coding tasks, measured from OpenRouter request logs. Persoje runs ~10× leaner and stays flat as a session grows, while Hermes is pinned near its context limit from turn one.
 
 ```
-$ persoje "find why the test fails and fix it"
-  ⚙ glob {"pattern":"**/*.py"}
-  ⚙ read {"path":"calc.py"}
-  ⚙ bash {"command":"python3 calc.py"}
-  ⚙ edit {"path":"calc.py", ...}
-  ⚙ bash {"command":"python3 calc.py"}
-Fixed: average() divided by len+1. All tests pass.
-  session: 7 calls · 9.4k tok · $0.00000
+❯ fix the failing test in calc.py
+
+◇ read(calc.py)        ⎿ 13 lines · 3ms
+✎ edit(calc.py)        ⎿ 1 replacement
+▸ bash(python3 calc.py) ⎿ all tests pass · 27ms
+
+╭─ ✦ persoje ──────────────────────────────────────────╮
+  Fixed — average() divided by len+1 instead of len.
+╰────────────────────────────────────────────────────────╯
+ ⬡ owl-alpha │ 1.3K/1M [░░░░░░░░░░] 0% │ $0.00 │ ⏱ 4s
 ```
 
 ## Install
 
 ```bash
+git clone https://github.com/acunningham-ship-it/Persoje.git ~/projects/persoje
+cd ~/projects/persoje
 bun install
-bun run src/cli.ts            # interactive TUI (first run launches setup)
-bun run compile               # single binary → dist/persoje
+bun run compile                       # → dist/persoje (standalone binary)
+ln -sf "$PWD/dist/persoje" ~/.local/bin/persoje
 ```
 
-Requires [Bun](https://bun.sh) and an `OPENROUTER_API_KEY` (or run the setup wizard).
-ripgrep recommended for the grep tool.
+Needs [Bun](https://bun.sh) and an `OPENROUTER_API_KEY` (env var, or the first-run wizard will set it up). [ripgrep](https://github.com/BurntSushi/ripgrep) is used by the grep tool if present.
+
+First launch with no config opens a setup wizard: validates your key, lists free tool-capable models, and writes `~/.config/persoje/config.json`.
 
 ## Usage
 
 ```bash
-persoje                       # Ink TUI, persistent sessions
-persoje "one-shot task"       # headless, auto-approve, prints cost
-persoje --plain               # bare REPL
-persoje --model openrouter/owl-alpha --resume <session-id>
-persoje dream                 # offline memory consolidation (free model, $0)
+persoje                       # interactive TUI (default)
+persoje "fix the build"       # one-shot, prints token + cost totals
+persoje --plain               # bare REPL, no TUI
+persoje --resume <id>         # resume a session by id
+persoje --model openrouter/owl-alpha
+persoje dream                 # offline: consolidate sessions into memory
+persoje --no-update           # skip the auto-update check
 ```
 
-TUI commands: `/model [id]` `/router on|off|auto|offer` `/cost` `/sessions` `/resume <id>`
-`/compact` `/clear` `/help`. `esc` cancels a turn; `y/n/a` answers permission prompts.
+In the TUI, type `/` for an autocomplete menu of commands. `esc` cancels a turn; `shift+tab` cycles trust levels; `y`/`n`/`a` answer permission prompts. Type while it's working to queue a follow-up.
 
-## Why it's cheap
+## Why it's lean
 
-| Layer | Mechanism |
+Token discipline is enforced *before* anything reaches the model:
+
+| Mechanism | What it does |
 |---|---|
-| Tool results | per-tool token caps enforced *before* anything enters history |
-| History | compaction at 80% of a self-imposed budget (default 40k, not the model max); mid-turn tool-result elision |
-| Project context | ranked repo-map (~800 tok) instead of file dumps |
-| Edits | search/replace blocks — no whole-file rewrites |
-| Caching | stable prompt prefix, `cache_control` breakpoints, provider pinning |
-| Delegation | `task` tool spawns sub-agents in isolated contexts; only a ≤500-tok summary returns |
-| Accounting | real cost per call from OpenRouter usage; live in the status bar |
+| **Goal anchor** | One pinned objective per session (set via a clarifying-question flow); the model never re-derives intent from scrollback. |
+| **Bounded context** | Recent turns at full fidelity + a rolling summary of the rest. Compaction kicks in adaptively as the context grows. |
+| **Swap-to-disk transcript** | The full conversation is mirrored to a `.md` on disk; the model reads it with the `transcript` tool only when it needs a dropped detail — instead of carrying everything "just in case." |
+| **Tool-result caps** | Bash/read/grep output is truncated to a token budget (head + tail on errors). No 5k-line dumps. |
+| **Repo-map** | A ranked symbol map (~800 tok) gives project awareness without dumping files. |
+| **Search/replace edits** | The model emits only the changed lines, never whole files. |
+| **Prompt caching** | Stable prompt prefix + `cache_control` breakpoints where the provider supports them. |
+| **Sub-agents** | The `task` tool delegates to an isolated-context worker; only a capped summary returns to the parent. |
+| **Live accounting** | Real per-call cost from OpenRouter, shown in the status gauge against the model's true context window. |
 
 ## Why it survives weak models
 
-- **Canary**: 3-prompt smoke test on first use of an unknown model; verdict persists to
-  `~/.config/persoje/models.json` and tunes guardrail strictness
-- **Rescue**: parses tool calls that models emit as text (`<tool_call>`, fenced JSON)
-- **Fuzzy match**: `read_file` → `read` instead of an error loop
-- **Loop guard**: identical repeated calls get blocked with a nudge, not executed
-- **Post-edit verify**: TS/JS/Python/JSON syntax-checked after every write; failures go
-  straight back to the model
-- **Router**: guardrail failures accumulate per model → suggests (or auto-switches to) a
-  stronger model. Toggle with `/router on|off`.
+Models lie, loop, and malform tool calls. The harness catches it:
 
-## Memory (the anti-Hermes design)
+- **Canary** — a 3-prompt smoke test on first use of an unknown model; the verdict is saved to `~/.config/persoje/models.json` and tunes how strict the guardrails are.
+- **Tool-call rescue** — parses tool calls a model emits as plain text (`<tool_call>…`, fenced JSON) when it doesn't use the native format.
+- **Fuzzy names** — `read_file` → `read` instead of an error loop.
+- **Loop + stuck detection** — blocks identical repeated calls; a turn that only errors for several rounds stops instead of spinning forever.
+- **Post-edit verification** — TS/JS/Python/JSON are syntax-checked after every write; failures go straight back to the model.
+- **Router escalation** — accumulated failures per model can suggest (or auto-switch to) a stronger one. Toggle with `/router`.
 
-Memory is out-of-band and bounded — ≤1.2k tokens at session start, ever:
+## Trust & safety
 
-- `~/.config/persoje/memory/MEMORY.md` — index, one line per fact (facts fetched lazily)
-- `lessons.jsonl` — failed turns append; loaded as compact bullets
-- `~/.config/persoje/skills/*.md` — BM25-searched, injected per turn only when relevant
-- `persoje dream` — a **free** model compresses recent sessions into durable facts, dedups,
-  expires stale lessons. Run it from cron; self-improvement at $0.
+Cycle trust with **shift+tab** (shown in the status bar):
+
+- **normal** — confirm bash, write, and edit.
+- **auto-edit** — edits run automatically; commands still confirm.
+- **yolo** (`/permsoff`) — everything runs automatically.
+
+…but a hardcoded **danger guard** in the core *always* confirms catastrophic operations regardless of trust level — `rm -rf` of root/home/outside-the-project, `sudo`, `curl | sh`, `git push --force`, `git reset --hard`, writes to `.env`/`.ssh`/secrets/system paths, and more. In headless mode (no human present) those are refused outright. Routine work (`rm -rf node_modules`, in-project edits) is never flagged, so yolo stays useful.
+
+## Memory & self-improvement
+
+Out-of-band and bounded — never more than ~1.2k tokens at session start:
+
+- **Facts** — `~/.config/persoje/memory/MEMORY.md` indexes one-fact-per-file notes; the model fetches the full text only when relevant.
+- **Lessons** — failed turns append to a log; loaded as compact bullets next time.
+- **Skills** — markdown procedures in `~/.config/persoje/skills/`, BM25-searched and injected only when relevant. The model can write its own with `add_skill`.
+- **`persoje dream`** — an offline consolidator (runs on a free model, ~$0) that compresses recent sessions into durable facts, dedupes, and expires stale lessons. Cron-friendly.
+
+## Autonomous mode
+
+`/autonomous on` (requires a goal) launches a headless daemon that resumes your session and keeps working toward the goal until it reports done — surviving SSH disconnects and terminal closes via `nohup`, with a watchdog that restarts it on crash. Pure bash, no tmux/systemd/cron. Monitor with `tail -f ~/.local/share/persoje-autonomous/session.log`; stop with `/autonomous off`.
+
+## Auto-update
+
+On launch (throttled to once every 4 hours, clean working tree only) Persoje fetches `origin`, and if it's **behind**, fast-forward pulls, rebuilds the binary, and re-execs it — so the `persoje` command stays current with this repo. Silent when up to date or offline. Skip with `--no-update` or `PERSOJE_NO_UPDATE=1`.
+
+## Commands
+
+```
+/model [id]        show model + profile, or switch
+/router on|off|auto|offer   model routing & escalation
+/canary            re-run the smoke test on the current model
+/goal [text|clear] show, set, or clear the pinned session goal
+/plan [on|off]     plan mode — spec before acting
+/effort low|mid|high|max    reasoning depth
+/cost              session token + cost totals
+/status            model, session, memory, router at a glance
+/config            show resolved config
+/permissions [clear]        always-allowed tools
+/permsoff          yolo: auto-run everything (danger still confirms)
+/autonomous on|off|status   persistent headless mode
+/resume [name]     interactive session picker, or resume by name
+/compact           summarize old history now
+/clear             clear conversation history
+/init              explore the project and write .persoje/PERSOJE.md
+/memory [slug]     list memory facts, or show one
+/skills            list skills in the library
+/lessons           recent lessons from failed turns
+/quirks            known quirks of the current model
+/repomap           show the repo-map sent to the model
+/dream             consolidate recent sessions into memory
+/mcp add|remove|connect|list|tools    manage MCP servers
+/personality show|set|reset|custom    tone, verbosity, work ethic
+/theme [name]      amber · ocean · forest · rose · mono
+/help   /exit
+```
 
 ## Config
 
-`~/.config/persoje/config.json` (global) ← `.persoje/config.json` (per-project):
+`~/.config/persoje/config.json` (global) is overlaid by `./.persoje/config.json` (per-project):
 
 ```jsonc
 {
   "model": { "primary": "openrouter/owl-alpha", "fallbacks": [], "compactor": "" },
-  "context": { "budgetTokens": 40000, "repoMapTokens": 800 },
+  "context": { "budgetTokens": 40000, "repoMapTokens": 800, "cacheSystemPrompt": true },
+  "loop": { "maxIterations": 0 },          // 0 = unlimited (circuit breaker still stops dead loops)
   "router": { "enabled": true, "mode": "offer", "canary": true },
   "memory": { "enabled": true, "budgetTokens": 1200, "dreamModel": "" },
-  "toolResultCaps": { "bash": 2000 }
+  "effort": { "level": "mid" },
+  "openrouter": { "provider": { "order": ["..."] } }   // optional provider pinning
 }
+```
+
+## Architecture
+
+UI-agnostic core that emits a typed event stream; the Ink TUI and the REPL are thin subscribers.
+
+```
+src/
+  core/        agent loop, events, prompt, tokens, personality, autonomous, updater
+  context/     ContextManager (compaction, elision), repo-map, transcript
+  models/      OpenRouter client (raw fetch + SSE, usage, retry, model catalog)
+  router/      model profiles, escalation, first-use canary
+  guardrails/  fuzzy names, text-rescue, loop detection, post-edit verify, danger guard
+  tools/       read/write/edit/bash/grep/glob/ls, set_goal, transcript, task, skills
+  memory/      facts, lessons, skills (BM25), dream consolidator
+  mcp/         MCP client
+  agents/      sub-agent spawner + pool
+  session/     bun:sqlite store (sessions, messages, usage, goal)
+  tui/         Ink app, components, theme, commands, markdown
+  setup/       first-run wizard
+docs/research/ design research that informed the build
 ```
 
 ## Development
 
 ```bash
-bun test          # 86 tests, no API key needed (scripted fake client)
+bun test            # ~150 tests, no API key needed (scripted fake client)
 bunx tsc --noEmit
+bun run start       # run from source
 ```
 
-Architecture: `src/core` (UI-agnostic event-stream agent loop) · `src/context` (compaction,
-repo-map) · `src/guardrails` · `src/router` · `src/memory` · `src/agents` (sub-agents) ·
-`src/tui` (Ink subscriber) · `src/session` (bun:sqlite). Design research in `docs/research/`.
+## License
+
+MIT.

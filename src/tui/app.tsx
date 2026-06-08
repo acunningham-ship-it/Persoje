@@ -30,7 +30,7 @@ const TOOL_ICON: Record<string, string> = {
   task: "◆",
 };
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 const HISTORY_PATH = join(homedir(), ".config", "persoje", "history.json");
 
 type DisplayItem =
