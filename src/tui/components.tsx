@@ -1,7 +1,29 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
 import type { CommandMeta } from "./commands.ts";
+import type { TodoItem } from "../tools/types.ts";
 import { theme, getTheme, type Theme } from "./theme.ts";
+
+/** The agent's live working plan — a compact checklist above the input box. */
+export function TodoList({ items, activeTheme }: { items: TodoItem[]; activeTheme?: Theme }): React.ReactElement | null {
+  const t = activeTheme ?? theme;
+  if (items.length === 0) return null;
+  const done = items.filter((i) => i.status === "done").length;
+  return (
+    <Box flexDirection="column" marginTop={1} marginLeft={2}>
+      <Text dimColor>plan · {done}/{items.length} done</Text>
+      {items.map((it, i) => {
+        const mark = it.status === "done" ? "✔" : it.status === "in_progress" ? "▸" : "○";
+        const color = it.status === "done" ? t.ok : it.status === "in_progress" ? t.accent : undefined;
+        return (
+          <Text key={i} color={color} strikethrough={it.status === "done"} dimColor={it.status === "pending"}>
+            {"  "}{mark} {it.content}
+          </Text>
+        );
+      })}
+    </Box>
+  );
+}
 
 // Dependency-free gradient: interpolate per-character between two hex stops.
 function gradient(text: string, from: [number, number, number], to: [number, number, number]): React.ReactElement[] {

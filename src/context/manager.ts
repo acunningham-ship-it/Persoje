@@ -1,6 +1,7 @@
 import type { ChatMessage, ToolCallRequest } from "../models/openrouter.ts";
 import { estimateTokens } from "../core/tokens.ts";
 import { truncate } from "../tools/truncate.ts";
+import type { TodoItem } from "../tools/types.ts";
 
 /**
  * ContextManager v3 — optimized context handling for OpenRouter.
@@ -46,6 +47,9 @@ export class ContextManager {
 
   /** The session goal — pinned in the system prompt every turn, survives compaction. */
   goal = "";
+
+  /** The working plan — pinned in the prompt while non-empty; cleared on /clear. */
+  todos: TodoItem[] = [];
   /** Track the "generation" — increments on each compaction, used for priority. */
   private generation = 0;
   /** Context growth velocity — tokens added per turn, smoothed. */
@@ -367,6 +371,7 @@ export class ContextManager {
 
   clear(): void {
     this.messages = [];
+    this.todos = [];
     this.generation++;
   }
 

@@ -1,5 +1,7 @@
 /** Typed event stream emitted by the agent core. The TUI/REPL are thin subscribers. */
 
+import type { TodoItem } from "../tools/types.ts";
+
 export interface UsageReport {
   model: string;
   inputTokens: number;
@@ -31,6 +33,7 @@ export type AgentEvent =
   | { type: "guardrail"; kind: "rescue" | "fuzzy" | "loop" | "syntax"; message: string }
   | { type: "router"; message: string; target: string | null }
   | { type: "compaction"; beforeTokens: number; afterTokens: number }
+  | { type: "todos"; items: TodoItem[] }
   | { type: "retry"; attempt: number; maxRetries: number; delayMs: number; reason: string }
   | { type: "turn-end"; reason: TurnEndReason; iterations: number }
   | { type: "error"; message: string; fatal: boolean };

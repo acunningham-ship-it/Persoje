@@ -244,7 +244,7 @@ export class Agent {
         const effort = (config as any).effort?.level ?? "mid";
         const personality = this.deps.personality ?? loadPersonality();
         const skillCatalog = this.deps.skills?.summaryForPrompt() ?? "";
-        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort, personality, skillCatalog, this.context.goal);
+        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort, personality, skillCatalog, this.context.goal, this.context.todos);
         // Use cache-optimized build when prompt caching is enabled — inserts
         // cache_control breakpoints at stable turn boundaries for maximum
         // cache hit rate on OpenRouter/Anthropic (50% cost on cached tokens).
@@ -433,6 +433,9 @@ export class Agent {
         this.context.goal = g;
         this.deps.onGoalSet?.(g);
       },
+      setTodos: (items) => {
+        this.context.todos = items;
+      },
       onProgress: (line: string) => this.deps.onToolProgress?.(tool.name, line),
     };
     const cap = config.toolResultCaps[tool.name] ?? tool.maxResultTokens;
@@ -448,6 +451,11 @@ export class Agent {
           this.deps.onFailure?.("syntax", config.model.primary);
           yield { type: "guardrail", kind: "syntax", message: `post-edit check failed: ${(parsed.data as any).path}` };
         }
+      }
+
+      // Surface plan changes to the UI so the checklist updates live mid-turn.
+      if (tool.name === "update_todos") {
+        yield { type: "todos", items: this.context.todos };
       }
 
       const { stored, truncated } = this.context.addToolResult(call.id, result, cap);

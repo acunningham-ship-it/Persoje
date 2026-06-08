@@ -15,7 +15,7 @@ import type { SkillLibrary } from "../memory/skills.ts";
 import { runCanary, qualityFromScore } from "../router/canary.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { COMMANDS, filterCommands, helpText, LIVE_SAFE } from "./commands.ts";
-import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar, AssistantBlock } from "./components.tsx";
+import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar, AssistantBlock, TodoList } from "./components.tsx";
 import { theme, getTheme, themeNames, type Theme } from "./theme.ts";
 import { loadPersonality, savePersonality, formatPersonality, PERSONALITY_OPTIONS, type Personality } from "../core/personality.ts";
 import type { McpManager } from "../mcp/client.ts";
@@ -181,6 +181,7 @@ export function App({
   const [statusCost, setStatusCost] = useState(0);
   const [turnIterations, setTurnIterations] = useState(0);
   const [turnTools, setTurnTools] = useState(0);
+  const [todos, setTodos] = useState<import("../tools/types.ts").TodoItem[]>([]);
   const [turnsOk, setTurnsOk] = useState(0);
   const [turnsFailed, setTurnsFailed] = useState(0);
   const [pickerSessions, setPickerSessions] = useState<import("../session/store.ts").SessionMeta[]>([]);
@@ -448,6 +449,9 @@ export function App({
               break;
             case "compaction":
               push({ kind: "info", text: `⇣ compacted history: ~${ev.beforeTokens} → ~${ev.afterTokens} tok` });
+              break;
+            case "todos":
+              setTodos(ev.items);
               break;
             case "retry": {
               const delaySec = (ev.delayMs / 1000).toFixed(1);
@@ -721,6 +725,7 @@ export function App({
           break;
         case "/clear":
           agent.context.clear();
+          setTodos([]);
           push({ kind: "info", text: "history cleared" });
           break;
         case "/bad": {
@@ -1268,6 +1273,8 @@ export function App({
       {busy ? <Spinner detail={busyLabel === "thinking" ? undefined : busyLabel} startedAt={busyStart} effort={(config as any).effort?.level ?? "mid"} /> : null}
 
       {pending ? <ApprovalPrompt name={pending.name} args={pending.args} dangerReason={pending.dangerReason} /> : null}
+
+      <TodoList items={todos} activeTheme={activeTheme} />
 
       {!pending ? (
         <Box flexDirection="column" marginTop={1}>

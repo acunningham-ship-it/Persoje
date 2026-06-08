@@ -14,6 +14,8 @@
 
 import type { Personality } from "./personality.ts";
 import { personalityPrompt, DEFAULT_PERSONALITY } from "./personality.ts";
+import type { TodoItem } from "../tools/types.ts";
+import { renderTodos } from "../tools/todo-tools.ts";
 
 export type EffortLevel = "low" | "mid" | "high" | "max";
 
@@ -32,6 +34,7 @@ export function buildSystemPrompt(
   personality?: Personality,
   skillCatalog?: string,
   goal = "",
+  todos: TodoItem[] = [],
 ): string {
   const personalitySection = personality
     ? `\n\n${personalityPrompt(personality)}`
@@ -46,6 +49,12 @@ export function buildSystemPrompt(
   const goalSection = goal
     ? `\n\nSESSION GOAL (keep this in focus; everything you do should serve it):\n${goal}`
     : `\n\nNo session goal is set yet. Before substantial work: if the task is ambiguous, ask 1-3 clarifying questions first (reply in text, no tools). Once clear, call set_goal with a one-paragraph objective, then proceed. If the task is already clear, call set_goal and continue in the same turn.`;
+
+  // The live plan, pinned so the model follows its own checklist instead of
+  // re-deriving "what's left" from scrollback every turn.
+  const todoSection = todos.length
+    ? `\n\nWORKING PLAN (update_todos to revise; mark steps done as you go):\n${renderTodos(todos)}`
+    : "";
 
   return `You are Persoje, a coding agent in a terminal. cwd: ${cwd}
 
@@ -62,5 +71,5 @@ Work by calling tools. Rules:
 - You can create new skills with add_skill when you discover a reusable procedure.
 - You can invoke skills with invoke_skill when you need to follow a known procedure.
 - Skills are lazy-loaded: you see names + descriptions, but must invoke_skill to get the full content.
-${EFFORT_PROMPTS[effort]}${goalSection}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${repoMap ? `\n\n${repoMap}` : ""}${skillSection}`;
+${EFFORT_PROMPTS[effort]}${goalSection}${todoSection}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${repoMap ? `\n\n${repoMap}` : ""}${skillSection}`;
 }

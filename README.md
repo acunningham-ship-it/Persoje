@@ -64,6 +64,7 @@ Token discipline is enforced *before* anything reaches the model:
 | Mechanism | What it does |
 |---|---|
 | **Goal anchor** | One pinned objective per session (set via a clarifying-question flow); the model never re-derives intent from scrollback. |
+| **Working plan** | For multi-step tasks the model keeps a live checklist (`update_todos`) pinned in the prompt — it follows its own plan instead of re-deriving "what's left" each turn, and you watch progress in the TUI. The goal anchor's finer-grained sibling. |
 | **Bounded context** | Recent turns at full fidelity + a rolling summary of the rest. Compaction kicks in adaptively as the context grows. |
 | **Swap-to-disk transcript** | The full conversation is mirrored to a `.md` on disk; the model reads it with the `transcript` tool only when it needs a dropped detail — instead of carrying everything "just in case." |
 | **Tool-result caps** | Bash/read/grep output is truncated to a token budget (head + tail on errors). No 5k-line dumps. |
@@ -170,7 +171,7 @@ src/
   models/      OpenRouter client (raw fetch + SSE, usage, retry, model catalog)
   router/      model profiles, escalation, first-use canary
   guardrails/  fuzzy names, text-rescue, loop detection, post-edit verify, danger guard
-  tools/       read/write/edit/bash/grep/glob/ls, web_fetch/web_search, set_goal, transcript, task, skills
+  tools/       read/write/edit/bash/grep/glob/ls, web_fetch/web_search, set_goal, update_todos, transcript, task, skills
   memory/      facts, lessons, skills (BM25), dream consolidator
   mcp/         MCP client
   agents/      sub-agent spawner + pool

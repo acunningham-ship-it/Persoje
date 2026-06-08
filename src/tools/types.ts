@@ -1,12 +1,20 @@
 import { z } from "zod";
 import type { ToolSchema } from "../models/openrouter.ts";
 
+/** A single step in the working plan the model maintains via update_todos. */
+export interface TodoItem {
+  content: string;
+  status: "pending" | "in_progress" | "done";
+}
+
 export interface ToolContext {
   cwd: string;
   signal?: AbortSignal;
   bashTimeoutMs: number;
   /** Record/replace the session goal (set_goal tool). */
   setGoal?: (goal: string) => void;
+  /** Replace the working plan (update_todos tool). */
+  setTodos?: (items: TodoItem[]) => void;
   /** Path to the full session transcript .md (transcript tool reads it). */
   transcriptPath?: string;
   /** Live progress (e.g. latest bash stdout line) — surfaced in the spinner. */

@@ -13,6 +13,7 @@ import { webFetchTool, webSearchTool } from "./tools/web-tools.ts";
 import { SessionStore } from "./session/store.ts";
 import { TranscriptWriter } from "./context/transcript.ts";
 import { setGoalTool, transcriptTool } from "./tools/goal-tools.ts";
+import { updateTodosTool } from "./tools/todo-tools.ts";
 import { buildRepoMap } from "./context/repo-map.ts";
 import { ProfileStore, Router } from "./router/router.ts";
 import { FactStore } from "./memory/facts.ts";
@@ -28,8 +29,9 @@ const VERSION = "0.4.0";
 function buildRegistry(skills: SkillLibrary, mcp?: McpManager): ToolRegistry {
   const registry = new ToolRegistry();
   for (const t of [readTool, writeTool, editTool, lsTool, globTool, bashTool, grepTool, webFetchTool, webSearchTool]) registry.register(t);
-  // Goal anchor + transcript escape-hatch
+  // Goal anchor + working plan + transcript escape-hatch
   registry.register(setGoalTool);
+  registry.register(updateTodosTool);
   registry.register(transcriptTool);
   // Self-learning skill tools. add_skill is always available (so it can create
   // the first one); invoke/list only matter once skills exist — gate them to
