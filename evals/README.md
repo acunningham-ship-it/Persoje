@@ -32,6 +32,22 @@ OPENROUTER_API_KEY=... bun run evals/run.ts --only bugfix
 
 Exit code is non-zero if any scored task failed, so it drops into CI.
 
+## Reference run
+
+On the free `openrouter/owl-alpha` model (no `--judge` skips nothing here —
+shown with it on), observed this session:
+
+| task | kind | result | turns | tok/turn | cost |
+|---|---|:--:|--:|--:|--:|
+| bugfix | assert | ✅ | 4 | ~2,015 | $0 |
+| feature-add | assert | ✅ | 6 | ~2,153 | $0 |
+| multi-edit-rename | assert | ✅ | 4 | ~2,015 | $0 |
+| explain-code | judge | ✅ | 2 | ~1,846 | $0 |
+
+A free model finishing real coding tasks (run→fix→verify, write+run a test,
+rename across a file) at ~2k tokens/turn, $0. Rerun with your own model:
+`bun run evals/run.ts --model <id> --judge`.
+
 ## Tasks
 
 | name | kind | exercises |
