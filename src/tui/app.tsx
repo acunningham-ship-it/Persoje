@@ -673,6 +673,7 @@ export function App({
               runDream({
                 client,
                 model: config.memory.dreamModel || config.model.compactor || config.model.primary,
+                judgeModel: (config as any).model?.judge || undefined,
                 store,
                 facts,
                 lessons,

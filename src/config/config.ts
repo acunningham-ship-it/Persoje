@@ -13,6 +13,8 @@ const ConfigSchema = z.object({
       compactor: z.string().default(""),
       /** Model for sub-agents (the `task` tool). Point at a FASTER model to cut delegation latency. Empty = primary. */
       subagent: z.string().default(""),
+      /** Model that vets facts during `dream` (LLM-as-judge). A stronger model here improves memory quality. Empty = dream model. */
+      judge: z.string().default(""),
       temperature: z.number().min(0).max(2).default(0.3),
     })
     .prefault({}),

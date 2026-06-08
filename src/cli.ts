@@ -216,6 +216,7 @@ async function main(): Promise<void> {
     const result = await runDream({
       client,
       model: config.memory.dreamModel || config.model.compactor || config.model.primary,
+      judgeModel: config.model.judge || undefined,
       store: new SessionStore(),
       facts: new FactStore(join(GLOBAL_CONFIG_DIR, "memory")),
       lessons: new LessonLog(join(GLOBAL_CONFIG_DIR, "memory", "lessons.jsonl")),

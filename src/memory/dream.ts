@@ -17,6 +17,8 @@ interface DreamOptions {
   lessons: LessonLog;
   /** Only consolidate sessions updated since this timestamp (ms). Default: 7 days ago. */
   sinceMs?: number;
+  /** Model that vets candidate facts before they're kept. Empty = use `model`. */
+  judgeModel?: string;
   /** Optional log function for progress output. */
   log?: (line: string) => void;
 }
@@ -150,16 +152,46 @@ Respond with ONLY valid JSON (no markdown fence, no extra text):
     return { factsAdded: 0, lessonsCompacted: 0 };
   }
 
-  // Add new facts
-  let factsAdded = 0;
-  if (parsed.facts && Array.isArray(parsed.facts)) {
-    for (const fact of parsed.facts.slice(0, 5)) {
-      if (fact.title && fact.body) {
-        facts.addFact(fact.title, fact.body);
-        factsAdded++;
-        logFn(`[dream] + fact: ${fact.title}`);
+  // Candidate facts, then a JUDGE pass: an independent model vets each one so
+  // vague opinions / business speculation / transient state don't pollute
+  // long-term memory (they'd be dead weight in every future session's context).
+  const candidates = (Array.isArray(parsed.facts) ? parsed.facts : [])
+    .filter((f) => f && f.title && f.body)
+    .slice(0, 5);
+  let keepFacts = candidates;
+  if (candidates.length > 0) {
+    const judgeModel = opts.judgeModel || model;
+    try {
+      const list = candidates.map((f, i) => `${i + 1}. ${f.title}: ${f.body}`).join("\n");
+      let raw = "";
+      for await (const event of client.stream({
+        model: judgeModel,
+        messages: [
+          {
+            role: "user",
+            content:
+              `You curate an AI coding agent's long-term memory. Keep a candidate fact ONLY if it's specific, actionable, and durable — a user preference, project convention, recurring technical gotcha, or model quirk that will help FUTURE CODING sessions. Drop anything vague, opinion, business speculation, or transient state.\n\nCandidates:\n${list}\n\nReply ONLY JSON: {"keep": [the numbers worth keeping]}`,
+          },
+        ],
+        maxTokens: 150,
+        temperature: 0,
+      })) {
+        if (event.type === "text") raw += event.delta;
       }
+      const m = raw.match(/\{[\s\S]*\}/);
+      const keep = new Set<number>(((JSON.parse(m ? m[0] : raw).keep ?? []) as unknown[]).map(Number));
+      keepFacts = candidates.filter((_, i) => keep.has(i + 1));
+      logFn(`[dream] judge kept ${keepFacts.length}/${candidates.length} facts`);
+    } catch {
+      logFn("[dream] judge unavailable — keeping candidates unfiltered");
     }
+  }
+
+  let factsAdded = 0;
+  for (const fact of keepFacts) {
+    facts.addFact(fact.title, fact.body);
+    factsAdded++;
+    logFn(`[dream] + fact: ${fact.title}`);
   }
 
   // Consolidate lessons
