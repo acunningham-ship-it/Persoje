@@ -628,7 +628,7 @@ export function App({
         case "/autonomous": {
           const sub = rest[0] || "status";
           void import("../core/autonomous.ts")
-            .then(({ autonomousCmd }) => autonomousCmd(sub, { push, alwaysAllow, exit, agent }))
+            .then(({ autonomousCmd }) => autonomousCmd(sub, { push, alwaysAllow, exit, sessionId, goal: agent.goal }))
             .catch((e) => push({ kind: "error", text: `autonomous: ${(e as Error).message}` }));
           break;
         }

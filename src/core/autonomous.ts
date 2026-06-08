@@ -30,7 +30,10 @@ interface AutonomousCtx {
   push: PushFn;
   alwaysAllow: React.MutableRefObject<Set<string>>;
   exit: () => void;
-  agent: unknown;
+  /** The live session id — the daemon resumes THIS session headless. */
+  sessionId: string;
+  /** Current goal — autonomous needs one to know what to keep working toward. */
+  goal: string;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -76,7 +79,7 @@ function setState(s: Record<string, unknown>) {
 }
 
 /** Write the self-healing watchdog script — pure bash, no deps. */
-function writeWatchdogScript() {
+function writeWatchdogScript(sessionId: string) {
   ensureDir();
   const script = `#!/usr/bin/env bash
 # Persoje Autonomous Watchdog
@@ -110,8 +113,8 @@ while true; do
     : # persoje is alive, do nothing
   else
     echo "[$(date -Iseconds)] persoje dead (pid $PERSOJE_PID) — restarting" >> "$LOG"
-    # Start persoje in background with nohup
-    nohup persoje >> "$LOG" 2>&1 &
+    # Resume the session headless and keep working toward the goal
+    nohup persoje headless "${sessionId}" >> "$LOG" 2>&1 &
     NEW_PID=$!
     echo "$NEW_PID" > "$PERSOJE_PID_FILE"
     echo "[$(date -Iseconds)] restarted persoje (pid $NEW_PID)" >> "$LOG"
@@ -124,8 +127,8 @@ done
   execSync(`chmod +x "${WATCHDOG_SCRIPT}"`);
 }
 
-function startWatchdog() {
-  writeWatchdogScript();
+function startWatchdog(sessionId: string) {
+  writeWatchdogScript(sessionId);
   const child = spawn("bash", [WATCHDOG_SCRIPT], {
     detached: true,
     stdio: "ignore",
@@ -163,21 +166,25 @@ export async function autonomousCmd(sub: string, ctx: AutonomousCtx): Promise<vo
 
   switch (sub) {
     case "on": {
-      // Step 1: Auto-approve all tools
+      // Autonomy needs a goal — that's what the daemon keeps working toward.
+      if (!ctx.goal.trim()) {
+        push({ kind: "error", text: "set a goal first (/goal <objective>) — autonomous mode works toward the goal headless." });
+        return;
+      }
+      // Auto-approve for THIS interactive process (the daemon has no approver,
+      // so the core danger guard refuses catastrophic ops there).
       permsoff(ctx);
-      push({ kind: "info", text: "🔓 all tools auto-approved" });
+      push({ kind: "info", text: `🔓 working toward goal headless: ${ctx.goal.slice(0, 80)}` });
 
-      // Step 2: Check if daemon is already running
       if (persojeRunning()) {
         const pid = readPid(PERSOJE_PID_FILE);
         push({ kind: "info", text: `✓ autonomous persoje already running (pid ${pid})` });
         push({ kind: "info", text: `  Monitor: tail -f ${LOG_FILE}` });
       } else {
-        // Step 3: Start persoje as a background daemon with nohup
         try {
-          // Write a launcher script that captures the PID
+          // Resume THIS session headless; nohup survives disconnect.
           const launcherScript = `#!/usr/bin/env bash
-nohup persoje >> "${LOG_FILE}" 2>&1 &
+nohup persoje headless "${ctx.sessionId}" >> "${LOG_FILE}" 2>&1 &
 echo $! > "${PERSOJE_PID_FILE}"
 `;
           const launcherPath = join(DIR, "launch.sh");
@@ -185,19 +192,19 @@ echo $! > "${PERSOJE_PID_FILE}"
           execSync(`chmod +x "${launcherPath}" && bash "${launcherPath}"`, { stdio: "pipe" });
 
           const pid = readPid(PERSOJE_PID_FILE);
-          push({ kind: "info", text: `✓ launched persoje daemon (pid ${pid})` });
+          push({ kind: "info", text: `✓ launched headless daemon for session ${ctx.sessionId} (pid ${pid})` });
         } catch (e) {
           push({ kind: "error", text: `failed to start daemon: ${(e as Error).message}` });
           return;
         }
       }
 
-      // Step 4: Start watchdog
+      // Watchdog auto-restarts the headless daemon if it dies.
       const watchdogPid = readPid(WATCHDOG_PID_FILE);
       if (watchdogPid > 0 && pidAlive(watchdogPid)) {
         push({ kind: "info", text: "✓ watchdog already running" });
       } else {
-        startWatchdog();
+        startWatchdog(ctx.sessionId);
         push({ kind: "info", text: "✓ watchdog started — auto-restarts on crash every 30s" });
       }
 

@@ -2,6 +2,7 @@
 import chalk from "chalk";
 import * as readline from "node:readline/promises";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { Agent } from "./core/agent.ts";
 import { loadConfig, resolveApiKey, GLOBAL_CONFIG_DIR, GLOBAL_CONFIG_PATH } from "./config/config.ts";
 import { OpenRouterClient } from "./models/openrouter.ts";
@@ -112,6 +113,54 @@ async function runTurn(agent: Agent, input: string): Promise<void> {
   );
 }
 
+/**
+ * Headless continuation loop for autonomous mode. Resumes a session and keeps
+ * working toward its goal, one continuation turn at a time, until the model
+ * reports DONE (or it stops making progress). On completion it signals the
+ * watchdog to stop so the daemon doesn't respawn into an idle loop.
+ */
+async function runHeadless(agent: Agent, maxRounds = 25): Promise<void> {
+  const log = (s: string) => process.stdout.write(`[${new Date().toISOString()}] ${s}\n`);
+  log(`headless start — goal: ${agent.goal || "(no goal set; nothing to continue)"}`);
+  if (!agent.goal) {
+    log("no goal — exiting. Set a goal before enabling autonomous mode.");
+    return;
+  }
+
+  for (let round = 1; round <= maxRounds; round++) {
+    let finalText = "";
+    let madeToolCall = false;
+    for await (const ev of agent.run(
+      "Continue working toward the SESSION GOAL using tools as needed. " +
+        "When the goal is fully achieved AND verified, reply with the single word DONE and stop.",
+    )) {
+      if (ev.type === "tool-start") {
+        madeToolCall = true;
+        log(`  ⚙ ${ev.name} ${JSON.stringify(ev.args).slice(0, 120)}`);
+      } else if (ev.type === "tool-result" && ev.isError) {
+        log(`  ✗ ${ev.result.split("\n")[0]}`);
+      } else if (ev.type === "text-end") {
+        finalText = ev.text;
+      } else if (ev.type === "error") {
+        log(`  error: ${ev.message}`);
+      }
+    }
+    log(`round ${round}: ${finalText.slice(0, 200)}`);
+    // Done when the model says so, or when it just talks without doing anything.
+    if (/\bDONE\b/.test(finalText) || (!madeToolCall && finalText)) {
+      log("goal complete — stopping autonomous daemon");
+      try {
+        const dir = join(homedir(), ".local", "share", "persoje-autonomous");
+        await Bun.write(join(dir, "stop-watchdog"), "");
+      } catch {
+        /* best-effort */
+      }
+      return;
+    }
+  }
+  log(`reached ${maxRounds} continuation rounds — pausing`);
+}
+
 function printHelp(): void {
   console.log(`
 ${chalk.bold("Persoje")} v${VERSION} — token-efficient agentic CLI
@@ -219,6 +268,32 @@ async function main(): Promise<void> {
   // The task tool lets the main model delegate to isolated sub-agents.
   // Pass full AgentDeps so subagents inherit repo-map, memory, skills.
   tools.register(makeTaskTool({ client, tools, config, cwd, repoMap, memoryContext, skills }));
+
+  // Headless mode: `persoje headless <sessionId>` — the autonomous daemon runs
+  // this. It resumes the session + goal and works toward the goal turn-by-turn
+  // until DONE, with no approver (so the core danger guard refuses catastrophic
+  // ops rather than auto-running them). Output is captured by the daemon log.
+  if (args[0] === "headless" && args[1]) {
+    const sessionId = args[1];
+    const store = new SessionStore();
+    const meta = store.get(sessionId);
+    if (!meta) {
+      console.error(`headless: no session ${sessionId}`);
+      process.exit(1);
+    }
+    agent.context.restore(store.loadMessages(sessionId));
+    agent.context.goal = store.getGoal(sessionId);
+    const transcript = new TranscriptWriter(sessionId);
+    agent.context.onAppend = (m) => {
+      store.appendMessage(sessionId, m);
+      transcript.append(m);
+    };
+    agent.context.onCompact = (m) => store.replaceMessages(sessionId, m);
+    agent.setSessionContext({ transcriptPath: transcript.filePath, onGoalSet: (g) => store.setGoal(sessionId, g) });
+    await runHeadless(agent);
+    store.close();
+    return;
+  }
 
   // One-shot mode: persoje "do the thing" (no persistence, auto-approve)
   const flagsWithValue = new Set(["--model", "--resume"]);
