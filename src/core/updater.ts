@@ -21,9 +21,12 @@
  */
 
 import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
+
+const CHECK_STAMP = join(homedir(), ".config", "persoje", ".last-update-check");
+const CHECK_THROTTLE_MS = 4 * 60 * 60 * 1000; // at most once per 4h — keep launches fast
 
 /** Find the project root by walking up looking for .git */
 export function findProjectRoot(): string | null {
@@ -79,6 +82,15 @@ export async function preLaunchUpdate(args: string[], onStatus?: (msg: string) =
   const root = findProjectRoot();
   if (!root) return; // not a git repo — skip silently
 
+  // Throttle: at most one network check per CHECK_THROTTLE_MS so we don't add
+  // a git fetch to the latency of every single launch.
+  try {
+    const last = parseInt(readFileSync(CHECK_STAMP, "utf8").trim(), 10);
+    if (last && Date.now() - last < CHECK_THROTTLE_MS) return;
+  } catch {
+    // no stamp yet — proceed with the check
+  }
+
   // Check working tree
   const status = git("status --porcelain", root);
   if (status === null || status !== "") return; // dirty or git failed — skip silently
@@ -90,7 +102,13 @@ export async function preLaunchUpdate(args: string[], onStatus?: (msg: string) =
   // Fetch
   onStatus?.("checking for updates…");
   const fetchResult = git(`fetch origin ${branch} --quiet`, root, 15_000);
-  if (fetchResult === null) return; // offline — skip silently
+  if (fetchResult === null) return; // offline — skip silently (retry next launch)
+  // Record the check so the next few hours of launches stay network-free.
+  try {
+    writeFileSync(CHECK_STAMP, String(Date.now()));
+  } catch {
+    /* best-effort */
+  }
 
   // Compare revisions
   const local = git("rev-parse HEAD", root);
