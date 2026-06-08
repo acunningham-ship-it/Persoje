@@ -17,6 +17,7 @@ export const COMMANDS: CommandMeta[] = [
   { name: "/compact", desc: "summarize old history now" },
   { name: "/clear", desc: "clear conversation history" },
   { name: "/init", desc: "explore the project and write .persoje/PERSOJE.md" },
+  { name: "/goal", args: "[text|clear]", desc: "show, set, or clear the pinned session goal" },
   { name: "/memory", args: "[slug]", desc: "list memory facts, or show one" },
   { name: "/skills", desc: "list skills in the library" },
   { name: "/lessons", desc: "recent lessons from failed turns" },

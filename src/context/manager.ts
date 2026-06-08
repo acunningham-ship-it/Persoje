@@ -44,6 +44,8 @@ export class ContextManager {
   /** Fired after compaction with the full post-compaction history (store rewrites itself). */
   onCompact?: (messages: readonly ChatMessage[]) => void;
 
+  /** The session goal — pinned in the system prompt every turn, survives compaction. */
+  goal = "";
   /** Track the "generation" — increments on each compaction, used for priority. */
   private generation = 0;
   /** Context growth velocity — tokens added per turn, smoothed. */

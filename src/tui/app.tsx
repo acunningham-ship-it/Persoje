@@ -512,6 +512,19 @@ export function App({
               "build/run/test commands, and conventions to follow. Then confirm what you wrote.",
           );
           break;
+        case "/goal": {
+          const arg = rest.join(" ").trim();
+          if (arg === "clear") {
+            agent.setGoal("");
+            push({ kind: "info", text: "goal cleared — it'll be re-established on your next task" });
+          } else if (arg) {
+            agent.setGoal(arg);
+            push({ kind: "info", text: `goal set:\n${arg}` });
+          } else {
+            push({ kind: "info", text: agent.goal ? `current goal:\n${agent.goal}` : "no goal set yet — it's established (with clarifying questions if needed) on your first task" });
+          }
+          break;
+        }
         case "/memory": {
           if (rest[0]) {
             const fact = facts.getFact(rest[0]);

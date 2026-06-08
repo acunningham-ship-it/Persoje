@@ -32,7 +32,8 @@ export class SessionStore {
         updated_at INTEGER NOT NULL,
         cwd TEXT NOT NULL,
         model TEXT NOT NULL,
-        title TEXT NOT NULL DEFAULT ''
+        title TEXT NOT NULL DEFAULT '',
+        goal TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,6 +57,21 @@ export class SessionStore {
         created_at INTEGER NOT NULL
       );
     `);
+    // Migration for DBs created before the goal column existed.
+    try {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN goal TEXT NOT NULL DEFAULT ''");
+    } catch {
+      // column already exists
+    }
+  }
+
+  setGoal(sessionId: string, goal: string): void {
+    this.db.prepare("UPDATE sessions SET goal = ?, updated_at = ? WHERE id = ?").run(goal, Date.now(), sessionId);
+  }
+
+  getGoal(sessionId: string): string {
+    const row = this.db.prepare("SELECT goal FROM sessions WHERE id = ?").get(sessionId) as { goal?: string } | null;
+    return row?.goal ?? "";
   }
 
   create(cwd: string, model: string): string {

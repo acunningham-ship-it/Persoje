@@ -175,7 +175,7 @@ export class OpenRouterClient {
           const idx = tc.index ?? 0;
           const existing = toolCalls.get(idx) ?? { id: "", name: "", argsJson: "" };
           if (tc.id) existing.id = tc.id;
-          if (tc.function?.name) existing.name += tc.function.function;
+          if (tc.function?.name) existing.name += tc.function.name;
           if (tc.function?.arguments) existing.argsJson += tc.function.arguments;
           toolCalls.set(idx, existing);
         }

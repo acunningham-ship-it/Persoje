@@ -5,6 +5,10 @@ export interface ToolContext {
   cwd: string;
   signal?: AbortSignal;
   bashTimeoutMs: number;
+  /** Record/replace the session goal (set_goal tool). */
+  setGoal?: (goal: string) => void;
+  /** Path to the full session transcript .md (transcript tool reads it). */
+  transcriptPath?: string;
 }
 
 export interface Tool<A = any> {

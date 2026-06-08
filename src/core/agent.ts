@@ -33,6 +33,10 @@ export interface AgentDeps {
   approve?: (name: string, args: Record<string, unknown>, dangerReason?: string) => Promise<boolean>;
   /** Guardrail failure sink — the router subscribes to learn which models misbehave. */
   onFailure?: (kind: "validation" | "loop" | "syntax" | "rescue", model: string) => void;
+  /** Path to the session transcript .md — given to the transcript tool. */
+  transcriptPath?: string;
+  /** Fired when the model (or /goal) sets the goal — persisted by the session store. */
+  onGoalSet?: (goal: string) => void;
 }
 
 /** Tools that can change the system — gated behind the approval hook. */
@@ -96,6 +100,22 @@ export class Agent {
     return this.deps.config.model.primary;
   }
 
+  get goal(): string {
+    return this.context.goal;
+  }
+
+  /** Set the goal directly (the /goal command) and persist via onGoalSet. */
+  setGoal(goal: string): void {
+    this.context.goal = goal;
+    this.deps.onGoalSet?.(goal);
+  }
+
+  /** Wire per-session bits (transcript path + goal persistence) after construction. */
+  setSessionContext(opts: { transcriptPath?: string; onGoalSet?: (goal: string) => void }): void {
+    if (opts.transcriptPath !== undefined) this.deps.transcriptPath = opts.transcriptPath;
+    if (opts.onGoalSet) this.deps.onGoalSet = opts.onGoalSet;
+  }
+
   get repoMap(): string {
     return this.deps.repoMap ?? "";
   }
@@ -114,6 +134,8 @@ export class Agent {
     yield { type: "turn-start", turn: this.turn };
 
     let iterations = 0;
+    let deadIters = 0; // consecutive iterations that made tool calls but ALL errored
+    const DEAD_LIMIT = 8; // circuit breaker — guarantees termination even when maxIter = 0
     const loops = new LoopDetector();
     const maxIter = config.loop.maxIterations; // 0 = unlimited
     try {
@@ -138,7 +160,7 @@ export class Agent {
         const effort = (config as any).effort?.level ?? "mid";
         const personality = this.deps.personality ?? loadPersonality();
         const skillCatalog = this.deps.skills?.summaryForPrompt() ?? "";
-        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort, personality, skillCatalog);
+        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort, personality, skillCatalog, this.context.goal);
         // Use cache-optimized build when prompt caching is enabled — inserts
         // cache_control breakpoints at stable turn boundaries for maximum
         // cache hit rate on OpenRouter/Anthropic (50% cost on cached tokens).
@@ -193,6 +215,8 @@ export class Agent {
           return;
         }
 
+        let anyOk = false;
+        let anyErr = false;
         for (const call of toolCalls) {
           if (signal?.aborted) {
             // The API requires a tool message for every tool_call id we stored.
@@ -208,9 +232,27 @@ export class Agent {
             this.deps.onFailure?.("loop", config.model.primary);
             yield { type: "guardrail", kind: "loop", message: `${call.name} repeated — execution blocked` };
             yield { type: "tool-result", id: call.id, name: call.name, result: msg, isError: true, truncated: false, durationMs: 0 };
+            anyErr = true;
             continue;
           }
-          yield* this.executeToolCall(call, signal);
+          for await (const ev of this.executeToolCall(call, signal)) {
+            if (ev.type === "tool-result") ev.isError ? (anyErr = true) : (anyOk = true);
+            yield ev;
+          }
+        }
+
+        // Circuit breaker: if a run keeps making tool calls that all error and
+        // nothing succeeds, stop — otherwise an unlimited (maxIter=0) turn spins
+        // forever on a confused model (e.g. malformed tool names).
+        deadIters = !anyOk && anyErr ? deadIters + 1 : 0;
+        if (deadIters >= DEAD_LIMIT) {
+          yield {
+            type: "error",
+            message: `Stopped: ${DEAD_LIMIT} straight rounds of tool errors with no progress. The model may be stuck — try rephrasing, a stronger model, or /clear.`,
+            fatal: false,
+          };
+          yield { type: "turn-end", reason: "max-iterations", iterations };
+          return;
         }
       }
       // Only reached if maxIter > 0 and we hit it
@@ -297,7 +339,16 @@ export class Agent {
       started = Date.now(); // don't count time spent waiting for the user's answer
     }
 
-    const ctx: ToolContext = { cwd, signal, bashTimeoutMs: config.loop.bashTimeoutMs };
+    const ctx: ToolContext = {
+      cwd,
+      signal,
+      bashTimeoutMs: config.loop.bashTimeoutMs,
+      transcriptPath: this.deps.transcriptPath,
+      setGoal: (g: string) => {
+        this.context.goal = g;
+        this.deps.onGoalSet?.(g);
+      },
+    };
     const cap = config.toolResultCaps[tool.name] ?? tool.maxResultTokens;
     try {
       let result = await tool.execute(parsed.data, ctx);

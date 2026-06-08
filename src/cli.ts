@@ -9,6 +9,8 @@ import { ToolRegistry } from "./tools/types.ts";
 import { readTool, writeTool, editTool, lsTool, globTool } from "./tools/file-tools.ts";
 import { bashTool, grepTool } from "./tools/shell-tools.ts";
 import { SessionStore } from "./session/store.ts";
+import { TranscriptWriter } from "./context/transcript.ts";
+import { setGoalTool, transcriptTool } from "./tools/goal-tools.ts";
 import { buildRepoMap } from "./context/repo-map.ts";
 import { ProfileStore, Router } from "./router/router.ts";
 import { FactStore } from "./memory/facts.ts";
@@ -24,6 +26,9 @@ const VERSION = "0.1.0";
 function buildRegistry(skills: SkillLibrary, mcp?: McpManager): ToolRegistry {
   const registry = new ToolRegistry();
   for (const t of [readTool, writeTool, editTool, lsTool, globTool, bashTool, grepTool]) registry.register(t);
+  // Goal anchor + transcript escape-hatch
+  registry.register(setGoalTool);
+  registry.register(transcriptTool);
   // Self-learning skill tools
   registry.register(makeAddSkillTool(skills));
   registry.register(makeInvokeSkillTool(skills));
@@ -236,11 +241,23 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       agent.context.restore(store.loadMessages(sessionId));
+      agent.context.goal = store.getGoal(sessionId); // re-pin the goal on resume
     } else {
       sessionId = store.create(cwd, config.model.primary);
     }
-    agent.context.onAppend = (msg) => store.appendMessage(sessionId, msg);
+    // Full transcript mirror (append-only — never truncated by compaction).
+    const transcript = new TranscriptWriter(sessionId);
+    agent.context.onAppend = (msg) => {
+      store.appendMessage(sessionId, msg);
+      transcript.append(msg);
+    };
     agent.context.onCompact = (messages) => store.replaceMessages(sessionId, messages);
+    // Persist the goal whenever the model (set_goal) or /goal sets it; give the
+    // transcript tool the path to consult.
+    agent.setSessionContext({
+      transcriptPath: transcript.filePath,
+      onGoalSet: (g) => store.setGoal(sessionId, g),
+    });
 
     // Real context windows for the status gauge (owl-alpha = 1M, not the 40k compaction budget).
     const modelWindows = await client.modelContextWindows();

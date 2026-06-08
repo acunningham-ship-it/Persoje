@@ -31,6 +31,7 @@ export function buildSystemPrompt(
   effort: EffortLevel = "mid",
   personality?: Personality,
   skillCatalog?: string,
+  goal = "",
 ): string {
   const personalitySection = personality
     ? `\n\n${personalityPrompt(personality)}`
@@ -39,6 +40,12 @@ export function buildSystemPrompt(
   const skillSection = skillCatalog
     ? `\n\n${skillCatalog}`
     : "";
+
+  // Goal anchor: when set, pinned every turn so the model never drifts. When
+  // unset, instruct the model to establish it first (ambiguity-gated).
+  const goalSection = goal
+    ? `\n\nSESSION GOAL (keep this in focus; everything you do should serve it):\n${goal}`
+    : `\n\nNo session goal is set yet. Before substantial work: if the task is ambiguous, ask 1-3 clarifying questions first (reply in text, no tools). Once clear, call set_goal with a one-paragraph objective, then proceed. If the task is already clear, call set_goal and continue in the same turn.`;
 
   return `You are Persoje, a coding agent in a terminal. cwd: ${cwd}
 
@@ -54,5 +61,5 @@ Work by calling tools. Rules:
 - You can create new skills with add_skill when you discover a reusable procedure.
 - You can invoke skills with invoke_skill when you need to follow a known procedure.
 - Skills are lazy-loaded: you see names + descriptions, but must invoke_skill to get the full content.
-${EFFORT_PROMPTS[effort]}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${repoMap ? `\n\n${repoMap}` : ""}${skillSection}`;
+${EFFORT_PROMPTS[effort]}${goalSection}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${repoMap ? `\n\n${repoMap}` : ""}${skillSection}`;
 }
