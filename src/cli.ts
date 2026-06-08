@@ -9,6 +9,7 @@ import { OpenRouterClient } from "./models/openrouter.ts";
 import { ToolRegistry } from "./tools/types.ts";
 import { readTool, writeTool, editTool, lsTool, globTool } from "./tools/file-tools.ts";
 import { bashTool, grepTool } from "./tools/shell-tools.ts";
+import { webFetchTool, webSearchTool } from "./tools/web-tools.ts";
 import { SessionStore } from "./session/store.ts";
 import { TranscriptWriter } from "./context/transcript.ts";
 import { setGoalTool, transcriptTool } from "./tools/goal-tools.ts";
@@ -22,11 +23,11 @@ import { makeAddSkillTool, makeInvokeSkillTool, makeListSkillsTool } from "./too
 import { McpManager } from "./mcp/client.ts";
 import { loadPersonality } from "./core/personality.ts";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 
 function buildRegistry(skills: SkillLibrary, mcp?: McpManager): ToolRegistry {
   const registry = new ToolRegistry();
-  for (const t of [readTool, writeTool, editTool, lsTool, globTool, bashTool, grepTool]) registry.register(t);
+  for (const t of [readTool, writeTool, editTool, lsTool, globTool, bashTool, grepTool, webFetchTool, webSearchTool]) registry.register(t);
   // Goal anchor + transcript escape-hatch
   registry.register(setGoalTool);
   registry.register(transcriptTool);

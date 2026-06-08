@@ -70,6 +70,7 @@ Token discipline is enforced *before* anything reaches the model:
 | **Repo-map** | A ranked symbol map (~800 tok) gives project awareness without dumping files. |
 | **Search/replace edits** | The model emits only the changed lines, never whole files. |
 | **Prompt caching** | Stable prompt prefix + `cache_control` breakpoints where the provider supports them. |
+| **Web research** | `web_search` (keyless, via DuckDuckGo) and `web_fetch` let the agent look up docs/APIs instead of guessing — HTML is stripped to lean markdown *before* it reaches the model, and the result is token-capped like any tool. |
 | **Sub-agents** | The `task` tool delegates to an isolated-context worker; only a capped summary returns to the parent. |
 | **Live accounting** | Real per-call cost from OpenRouter, shown in the status gauge against the model's true context window. |
 
@@ -169,7 +170,7 @@ src/
   models/      OpenRouter client (raw fetch + SSE, usage, retry, model catalog)
   router/      model profiles, escalation, first-use canary
   guardrails/  fuzzy names, text-rescue, loop detection, post-edit verify, danger guard
-  tools/       read/write/edit/bash/grep/glob/ls, set_goal, transcript, task, skills
+  tools/       read/write/edit/bash/grep/glob/ls, web_fetch/web_search, set_goal, transcript, task, skills
   memory/      facts, lessons, skills (BM25), dream consolidator
   mcp/         MCP client
   agents/      sub-agent spawner + pool

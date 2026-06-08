@@ -60,8 +60,10 @@ export async function runSubAgent(
     parent.config.context.budgetTokens,
   );
 
-  // Subset tools: read-only default is [read, grep, glob, ls].
-  const allowedTools = spec.tools ?? ["read", "grep", "glob", "ls"];
+  // Subset tools: read-only default is [read, grep, glob, ls] plus web research.
+  // subset() silently drops names the parent doesn't have, so web_* is safe to
+  // list even though it costs nothing when the tools aren't registered.
+  const allowedTools = spec.tools ?? ["read", "grep", "glob", "ls", "web_search", "web_fetch"];
   const childRegistry = parent.tools.subset(allowedTools);
 
   // Build child agent — inherit repoMap + memoryContext from parent so the

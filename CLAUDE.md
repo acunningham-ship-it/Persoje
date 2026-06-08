@@ -32,7 +32,7 @@ context/    ContextManager (compaction/elision), repo-map, transcript
 models/     OpenRouter client (raw fetch + SSE, usage, retry, model catalog)
 router/     model profiles, escalation, first-use canary
 guardrails/ fuzzy names, text-rescue, loop detection, post-edit verify, danger guard
-tools/      read/write/edit/bash/grep/glob/ls, set_goal, transcript, task, skills
+tools/      read/write/edit/bash/grep/glob/ls, web_fetch/web_search, set_goal, transcript, task, skills
 memory/     facts, lessons, skills (BM25), dream consolidator
 agents/     sub-agent spawner + pool   ·   mcp/  MCP client   ·   session/  sqlite store
 tui/        Ink app, components, theme, commands, markdown   ·   setup/  first-run wizard
