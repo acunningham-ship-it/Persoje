@@ -122,6 +122,12 @@ function compactArgs(name: string, args: Record<string, unknown>): string {
 
 let nextId = 1;
 
+/** Copy text to the clipboard via OSC52 — works locally and over SSH (iTerm). */
+function osc52Copy(text: string): void {
+  const b64 = Buffer.from(text).toString("base64");
+  process.stdout.write(`\x1b]52;c;${b64}\x07`);
+}
+
 /** Expand `@path` mentions in a prompt by inlining the (truncated) file contents. */
 async function expandFileRefs(text: string, cwd: string): Promise<string> {
   const refs = [...new Set([...text.matchAll(/(?:^|\s)@([^\s]+)/g)].map((m) => m[1]!))];
@@ -203,7 +209,9 @@ export function App({
   const alwaysAllow = useRef(new Set<string>());
   const streamBuf = useRef("");
   const toolArgs = useRef(new Map<string, string>()); // call id → args preview
-  const lastTaskRef = useRef(""); // most recent user task, for /good and /bad
+  const lastTaskRef = useRef(""); // most recent user task, for /good /bad /retry
+  const lastAssistantRef = useRef(""); // most recent assistant reply, for /copy
+  const editedFilesRef = useRef(new Set<string>()); // files the agent wrote/edited, for /undo
 
   const menuItems = !busy && !pending ? filterCommands(input) : [];
   const menuVisible = menuItems.length > 0;
@@ -390,12 +398,17 @@ export function App({
               streamBuf.current = "";
               setStream("");
               push({ kind: "assistant", text: ev.text });
+              lastAssistantRef.current = ev.text; // for /copy
               break;
             case "tool-start": {
               const preview = compactArgs(ev.name, ev.args);
               toolArgs.current.set(ev.id, preview);
               setBusyLabel(`${ev.name}(${preview})`);
               setTurnIterations((n) => n + 1);
+              // Track files the agent changed, for /undo.
+              if ((ev.name === "write" || ev.name === "edit") && typeof ev.args.path === "string") {
+                editedFilesRef.current.add(ev.args.path);
+              }
               break;
             }
             case "tool-result": {
@@ -501,6 +514,97 @@ export function App({
           );
           void maybeCanary(rest[0]);
           break;
+        case "/recap":
+          push({ kind: "info", text: "recapping…" });
+          void agent.recap().then(
+            (r) => push({ kind: "info", text: r }),
+            (e) => push({ kind: "error", text: `recap failed: ${(e as Error).message}` }),
+          );
+          break;
+        case "/retry":
+          if (!lastTaskRef.current) {
+            push({ kind: "info", text: "nothing to retry yet" });
+            break;
+          }
+          push({ kind: "info", text: `retrying: ${lastTaskRef.current.slice(0, 60)}` });
+          void runTurn(lastTaskRef.current);
+          break;
+        case "/copy": {
+          const last = lastAssistantRef.current;
+          if (!last) {
+            push({ kind: "info", text: "nothing to copy yet" });
+            break;
+          }
+          const blocks = [...last.matchAll(/```[\w-]*\n([\s\S]*?)```/g)].map((m) => m[1]!);
+          const text = rest[0] === "code" && blocks.length ? blocks[blocks.length - 1]! : last;
+          osc52Copy(text);
+          push({ kind: "info", text: `📋 copied ${text.length} chars${rest[0] === "code" ? " (last code block)" : ""} to clipboard` });
+          break;
+        }
+        case "/diff": {
+          const isRepo = Bun.spawnSync(["git", "-C", cwd, "rev-parse", "--is-inside-work-tree"]).exitCode === 0;
+          if (!isRepo) {
+            push({ kind: "info", text: "not a git repo — nothing to diff" });
+            break;
+          }
+          const stat = new TextDecoder().decode(Bun.spawnSync(["git", "-C", cwd, "diff", "--stat"]).stdout).trim();
+          const full = new TextDecoder().decode(Bun.spawnSync(["git", "-C", cwd, "diff"]).stdout);
+          push({
+            kind: "info",
+            text: stat ? `${stat}\n\n${truncate(full, 1500).text}` : "no uncommitted changes",
+          });
+          break;
+        }
+        case "/models": {
+          const filter = rest.join(" ").toLowerCase();
+          push({ kind: "info", text: "fetching model catalog…" });
+          void client.catalog().then(
+            (cat) => {
+              let list = cat.filter((m) => m.tools);
+              if (filter) list = list.filter((m) => m.id.toLowerCase().includes(filter));
+              list.sort((a, b) => a.inPrice - b.inPrice);
+              const lines = list
+                .slice(0, 25)
+                .map((m) => `  ${m.id}  ${m.inPrice === 0 ? "free" : "$" + m.inPrice.toFixed(2) + "/M"} · ${Math.round(m.context / 1000)}k ctx`);
+              push({
+                kind: "info",
+                text: lines.length
+                  ? `tool-capable models${filter ? ` matching "${filter}"` : ""} (cheapest first) — /dmodel <id> to set:\n${lines.join("\n")}`
+                  : `no tool-capable models matched "${filter}"`,
+              });
+            },
+            () => push({ kind: "error", text: "couldn't fetch the model catalog" }),
+          );
+          break;
+        }
+        case "/undo": {
+          const files = [...editedFilesRef.current];
+          if (!files.length) {
+            push({ kind: "info", text: "no files edited this session" });
+            break;
+          }
+          if (Bun.spawnSync(["git", "-C", cwd, "rev-parse", "--is-inside-work-tree"]).exitCode !== 0) {
+            push({ kind: "error", text: "/undo needs a git repo to restore from" });
+            break;
+          }
+          const restored: string[] = [];
+          const skipped: string[] = [];
+          for (const f of files) {
+            const tracked = Bun.spawnSync(["git", "-C", cwd, "ls-files", "--error-unmatch", "--", f]).exitCode === 0;
+            if (tracked) {
+              Bun.spawnSync(["git", "-C", cwd, "checkout", "HEAD", "--", f]);
+              restored.push(f);
+            } else {
+              skipped.push(f);
+            }
+          }
+          editedFilesRef.current.clear();
+          push({
+            kind: "info",
+            text: `↩ reverted ${restored.length} file(s) to HEAD${skipped.length ? `; left ${skipped.length} new/untracked (delete manually): ${skipped.join(", ")}` : ""}`,
+          });
+          break;
+        }
         case "/router":
           if (rest[0] === "on") router.enabled = true;
           else if (rest[0] === "off") router.enabled = false;

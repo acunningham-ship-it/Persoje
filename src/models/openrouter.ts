@@ -109,6 +109,26 @@ export class OpenRouterClient {
     return map;
   }
 
+  /** Fetch the model catalog with pricing + tool support (for the /models picker). */
+  async catalog(): Promise<Array<{ id: string; context: number; inPrice: number; outPrice: number; tools: boolean }>> {
+    try {
+      const res = await fetch(`${this.baseUrl}/models`, { headers: { Authorization: `Bearer ${this.apiKey}` } });
+      if (!res.ok) return [];
+      const data = (await res.json()) as {
+        data?: Array<{ id: string; context_length?: number; pricing?: { prompt?: string; completion?: string }; supported_parameters?: string[] }>;
+      };
+      return (data.data ?? []).map((m) => ({
+        id: m.id,
+        context: m.context_length ?? 0,
+        inPrice: Number(m.pricing?.prompt ?? 0) * 1e6,
+        outPrice: Number(m.pricing?.completion ?? 0) * 1e6,
+        tools: (m.supported_parameters ?? []).includes("tools"),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   /**
    * Stream a chat completion. Yields text deltas as they arrive, accumulated tool
    * calls once complete, and a final usage report with real cost from OpenRouter.

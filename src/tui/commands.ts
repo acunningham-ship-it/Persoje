@@ -8,6 +8,12 @@ export interface CommandMeta {
 export const COMMANDS: CommandMeta[] = [
   { name: "/model", args: "[id]", desc: "show model + profile, or switch (this session only)" },
   { name: "/dmodel", args: "<id>", desc: "set the default model (persists to config, all new sessions)" },
+  { name: "/models", args: "[filter]", desc: "list tool-capable models (price + context) to pick from" },
+  { name: "/recap", desc: "summarize the session so far — what's done, current state, next" },
+  { name: "/retry", desc: "re-run the last task (e.g. after switching model)" },
+  { name: "/copy", args: "[code]", desc: "copy last reply (or its last code block) to clipboard" },
+  { name: "/diff", desc: "show uncommitted git changes (what changed this session)" },
+  { name: "/undo", desc: "revert files the agent edited this session (git repo only)" },
   { name: "/router", args: "on|off|auto|offer", desc: "toggle model routing & escalation" },
   { name: "/canary", desc: "re-run the 3-prompt smoke test on the current model" },
   { name: "/cost", desc: "session token + cost totals" },

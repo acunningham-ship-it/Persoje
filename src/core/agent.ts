@@ -131,6 +131,35 @@ export class Agent {
     }
   }
 
+  /** Short "where are we" summary of the session so far (the /recap command). */
+  async recap(): Promise<string> {
+    const { client, config } = this.deps;
+    const transcript = this.context
+      .history()
+      .slice(-20)
+      .map((m) => {
+        if (m.role === "tool") return `[tool] ${(m.content ?? "").slice(0, 150)}`;
+        return `${m.role}: ${(m.content ?? "").slice(0, 400)}`;
+      })
+      .join("\n");
+    if (!transcript.trim()) return "Nothing to recap yet.";
+    let out = "";
+    const stream = client.stream({
+      model: config.model.compactor || config.model.primary,
+      messages: [
+        {
+          role: "user",
+          content:
+            `Recap this coding session for someone rejoining it. 4-6 short bullets: what's been done, the current state, and what's next. No preamble.\n\n${transcript}`,
+        },
+      ],
+      maxTokens: 400,
+      temperature: 0,
+    });
+    for await (const ev of stream) if (ev.type === "text") out += ev.delta;
+    return out.trim() || "(recap unavailable)";
+  }
+
   /** Install/replace the approval hook after construction (the TUI does this). */
   setApprover(approve: AgentDeps["approve"]): void {
     this.deps.approve = approve;
