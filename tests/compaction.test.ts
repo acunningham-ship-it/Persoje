@@ -89,3 +89,20 @@ test("onCompact fires with the rewritten history", async () => {
   await cm.compact(async () => "s");
   expect(captured).toBe(9);
 });
+
+test("compaction triggers by turn count, not just tokens (rolling summary)", async () => {
+  const cm = new ContextManager(40000, 0.8, 4); // huge budget — token trigger won't fire
+  const turn = () => {
+    cm.addUser("small task");
+    cm.addAssistant("done");
+  };
+  for (let i = 0; i < 6; i++) turn(); // 6 user turns ≤ keepFullTurns(4)+2
+  expect(cm.needsCompaction()).toBe(false);
+  turn(); // 7th user turn → over the threshold even though tokens are tiny
+  expect(cm.needsCompaction()).toBe(true);
+
+  await cm.compact(async () => "summary of older turns");
+  // after folding older turns into one summary, it's back under the threshold
+  expect(cm.needsCompaction()).toBe(false);
+  expect(cm.history()[0]!.content).toContain("[Summary of earlier conversation]");
+});

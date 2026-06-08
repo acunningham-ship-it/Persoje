@@ -308,8 +308,16 @@ export class ContextManager {
     // If growing slowly, compact at the configured threshold
     const velocityRatio = this.velocity / this.budgetTokens;
     const dynamicThreshold = velocityRatio > 0.05 ? 0.6 : this.compactionThreshold;
+    if (ratio > dynamicThreshold) return true;
 
-    return ratio > dynamicThreshold;
+    // Turn-count trigger: once we're more than keepFullTurns(+2) real user turns
+    // deep, fold the older turns into the summary even if we're under the token
+    // budget — so we stop replaying the whole transcript every turn (the original
+    // "goal + recent + summary" design). Full detail stays on disk via `transcript`.
+    const userTurns = this.messages.filter(
+      (m) => m.role === "user" && !m.content.startsWith("[Summary of earlier conversation]"),
+    ).length;
+    return userTurns > this.keepFullTurns + 2;
   }
 
   history(): readonly ChatMessage[] {
