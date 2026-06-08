@@ -2,6 +2,7 @@ import { z } from "zod";
 import { resolve, dirname } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { ToolError, type Tool, type ToolContext } from "./types.ts";
+import { flexibleMatch, nearMatchHint } from "./edit-match.ts";
 
 function resolveInCwd(path: string, ctx: ToolContext): string {
   return resolve(ctx.cwd, path);
@@ -65,22 +66,42 @@ export const editTool: Tool = {
     const content = await file.text();
 
     const count = content.split(old_string).length - 1;
-    if (count === 0) {
-      throw new ToolError(
-        `old_string not found in ${path}. Read the file first and copy the exact text, including whitespace.`,
-      );
-    }
     if (count > 1 && !replace_all) {
       throw new ToolError(
         `old_string matches ${count} times in ${path}. Add surrounding lines to make it unique, or set replace_all.`,
       );
     }
 
-    const updated = replace_all
-      ? content.split(old_string).join(new_string)
-      : content.replace(old_string, new_string);
-    await Bun.write(abs, updated);
-    return `Edited ${path} (${replace_all ? count : 1} replacement${(replace_all ? count : 1) === 1 ? "" : "s"})`;
+    // Exact match: apply directly.
+    if (count >= 1) {
+      const updated = replace_all
+        ? content.split(old_string).join(new_string)
+        : content.replace(old_string, new_string);
+      await Bun.write(abs, updated);
+      const n = replace_all ? count : 1;
+      return `Edited ${path} (${n} replacement${n === 1 ? "" : "s"})`;
+    }
+
+    // No exact match. Fall back to a whitespace-tolerant line match, but only
+    // when it's unique — never guess. This rescues the most common weak-model
+    // miss (a dropped trailing space or off-by-a-bit indent) without a retry
+    // loop, and refuses rather than risk editing the wrong place.
+    const flex = flexibleMatch(content, old_string);
+    if (flex === "ambiguous") {
+      throw new ToolError(
+        `old_string isn't exact, and a whitespace-tolerant match found several candidates in ${path}. Add surrounding lines to disambiguate, or copy the exact text including indentation.`,
+      );
+    }
+    if (flex) {
+      const updated = content.replace(flex.original, new_string);
+      await Bun.write(abs, updated);
+      const why = flex.how === "trailing-space" ? "trailing whitespace" : "indentation";
+      return `Edited ${path} (1 replacement; matched ignoring ${why} — old_string wasn't exact)`;
+    }
+
+    throw new ToolError(
+      `old_string not found in ${path}. Read the file first and copy the exact text, including whitespace.${nearMatchHint(content, old_string)}`,
+    );
   },
 };
 

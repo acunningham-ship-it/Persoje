@@ -46,3 +46,40 @@ test("errors clearly when old_string is missing", async () => {
     editTool.execute({ path: "d.ts", old_string: "absent", new_string: "x" }, ctx),
   ).rejects.toThrow(/not found/);
 });
+
+test("falls back when old_string adds a trailing space the file lacks", async () => {
+  writeFileSync(join(dir, "e.ts"), "const a = 1;\nconst b = 2;\n");
+  // Model copied the line but tacked on a trailing space — no exact substring.
+  const result = await editTool.execute(
+    { path: "e.ts", old_string: "const a = 1; ", new_string: "const a = 9;" },
+    ctx,
+  );
+  expect(result).toContain("trailing whitespace");
+  expect(readFileSync(join(dir, "e.ts"), "utf-8")).toBe("const a = 9;\nconst b = 2;\n");
+});
+
+test("falls back when indentation differs entirely", async () => {
+  writeFileSync(join(dir, "f.ts"), "return 1;\n");
+  // Model added 4 spaces of indent the flat file doesn't have — no exact substring.
+  const result = await editTool.execute(
+    { path: "f.ts", old_string: "    return 1;", new_string: "return 2;" },
+    ctx,
+  );
+  expect(result).toContain("indentation");
+  expect(readFileSync(join(dir, "f.ts"), "utf-8")).toBe("return 2;\n");
+});
+
+test("refuses an ambiguous whitespace-tolerant match", async () => {
+  // No exact substring (trailing space), but two lines match once normalized.
+  writeFileSync(join(dir, "g.ts"), "log();\nlog();\n");
+  await expect(
+    editTool.execute({ path: "g.ts", old_string: "log(); ", new_string: "warn();" }, ctx),
+  ).rejects.toThrow(/several candidates/);
+});
+
+test("near-match hint points at the right line on a real miss", async () => {
+  writeFileSync(join(dir, "h.ts"), "const total = compute();\n");
+  await expect(
+    editTool.execute({ path: "h.ts", old_string: "const total = compute( );", new_string: "x" }, ctx),
+  ).rejects.toThrow(/Nearest lines/);
+});
