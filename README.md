@@ -23,6 +23,8 @@ The premise: **a good harness makes a cheap model punch above its weight.** Heav
  ⬡ owl-alpha │ 1.3K/1M [░░░░░░░░░░] 0% │ $0.00 │ ⏱ 4s
 ```
 
+▶ **Demo:** [`docs/demo.cast`](docs/demo.cast) — a real recorded session (`asciinema play docs/demo.cast`). The run above is verbatim from it: read → run → diagnose → fix → verify, ~5 calls, $0.
+
 ## Install
 
 ```bash
