@@ -110,13 +110,18 @@ export async function preLaunchUpdate(args: string[], onStatus?: (msg: string) =
     /* best-effort */
   }
 
-  // Compare revisions
+  // Only update when we're genuinely BEHIND origin. Checking local !== remote
+  // alone would fire during development (local ahead, unpushed) and spuriously
+  // rebuild/re-exec on every launch. HEAD..origin counts commits we're missing.
+  const behind = git(`rev-list --count HEAD..origin/${branch}`, root);
+  if (!behind || behind === "0") return; // up to date or ahead — nothing to pull
+
   const local = git("rev-parse HEAD", root);
   const remote = git(`rev-parse origin/${branch}`, root);
-  if (!local || !remote || local === remote) return; // up to date
+  if (!local || !remote) return;
 
   // We're behind — pull + rebuild
-  onStatus?.("updating…");
+  onStatus?.(`updating (${behind} commit${behind === "1" ? "" : "s"} behind)…`);
 
   const pull = git(`pull --ff-only origin ${branch}`, root, 30_000);
   if (pull === null) return; // diverged — skip silently
