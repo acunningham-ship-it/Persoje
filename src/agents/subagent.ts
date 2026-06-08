@@ -50,8 +50,11 @@ export async function runSubAgent(
 ): Promise<SubAgentResult> {
   // Clone parent config via JSON round-trip; override model and budget.
   const childConfig = JSON.parse(JSON.stringify(parent.config));
-  childConfig.model.primary = spec.model ?? parent.config.model.primary;
-  childConfig.loop.maxIterations = spec.maxIterations ?? 10;
+  // Prefer an explicitly faster sub-agent model; delegation is the slowest path.
+  childConfig.model.primary = spec.model ?? (parent.config.model.subagent || parent.config.model.primary);
+  // Sub-agents are focused (search/research/review) — cap turns low so a single
+  // delegation can't balloon into a 10-turn sub-session on a slow model.
+  childConfig.loop.maxIterations = spec.maxIterations ?? 5;
   childConfig.context.budgetTokens = Math.min(
     spec.contextBudget ?? 40_000,
     parent.config.context.budgetTokens,

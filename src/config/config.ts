@@ -11,6 +11,8 @@ const ConfigSchema = z.object({
       fallbacks: z.array(z.string()).default([]),
       /** Model used for compaction summaries — grunt work, point it at a free model. Empty = primary. */
       compactor: z.string().default(""),
+      /** Model for sub-agents (the `task` tool). Point at a FASTER model to cut delegation latency. Empty = primary. */
+      subagent: z.string().default(""),
       temperature: z.number().min(0).max(2).default(0.3),
     })
     .prefault({}),
