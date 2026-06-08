@@ -66,6 +66,29 @@ describe("applyEdit", () => {
   test("reports missing when nothing matches", () => {
     expect(applyEdit("nothing\n", "absent", "x")).toEqual({ ok: false, reason: "missing", count: 0 });
   });
+
+  test("flexible match splices the matched line, not an earlier look-alike substring", () => {
+    // Line "prefix_x = 1;" contains "x = 1;" as a suffix and comes first. The
+    // model's old_string has a trailing space (so exact fails) and the real,
+    // unique target is the standalone "x = 1;" line. A naive content.replace()
+    // would clobber the prefix line; splice-by-offset must hit the right one.
+    const content = "prefix_x = 1;\nfoo();\nx = 1;\nbar();\n";
+    const r = applyEdit(content, "x = 1; ", "x = 99;");
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.how).toBe("trailing-space");
+      expect(r.content).toBe("prefix_x = 1;\nfoo();\nx = 99;\nbar();\n");
+    }
+  });
+
+  test("flexible match returns a correct character offset", () => {
+    const m = flexibleMatch("aa\nbb \ncc", "bb");
+    if (m && m !== "ambiguous") {
+      expect("aa\nbb \ncc".slice(m.index, m.index + m.original.length)).toBe(m.original);
+    } else {
+      throw new Error("expected a match");
+    }
+  });
 });
 
 describe("nearMatchHint", () => {

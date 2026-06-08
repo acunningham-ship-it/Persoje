@@ -85,6 +85,17 @@ describe("ssrfReason", () => {
     expect(ssrfReason("https://bun.sh/docs")).toBeNull();
     expect(ssrfReason("example.com")).toBeNull();
     expect(ssrfReason("http://172.32.0.1/")).toBeNull(); // outside 16–31 private band
+    expect(ssrfReason("http://8.8.8.8/")).toBeNull();
+  });
+
+  test("blocks evasion forms: integer IP, IPv6 loopback, mapped IPv4, FQDN dot", () => {
+    expect(ssrfReason("http://2130706433/")).toBeTruthy(); // 127.0.0.1 as int
+    expect(ssrfReason("http://[::1]/")).toBeTruthy();
+    expect(ssrfReason("http://[::ffff:127.0.0.1]/")).toBeTruthy(); // mapped loopback
+    expect(ssrfReason("http://[fd00::1]/")).toBeTruthy(); // unique-local
+    expect(ssrfReason("http://[fe80::1]/")).toBeTruthy(); // link-local
+    expect(ssrfReason("http://localhost./")).toBeTruthy(); // trailing-dot FQDN
+    expect(ssrfReason("http://3232235521/")).toBeTruthy(); // 192.168.0.1 as int
   });
 });
 

@@ -16,6 +16,9 @@ export type MatchHow = "exact" | "trailing-space" | "indentation";
 export interface FlexMatch {
   /** The exact substring of `content` to replace. */
   original: string;
+  /** Character offset of `original` in `content` — so the caller splices the
+   *  matched span exactly, never a same-looking substring at an earlier spot. */
+  index: number;
   how: MatchHow;
 }
 
@@ -58,7 +61,10 @@ export function flexibleMatch(content: string, oldStr: string): FlexMatch | "amb
     }
     if (hits.length === 1) {
       const i = hits[0]!;
-      return { original: cLines.slice(i, i + k).join("\n"), how };
+      // Char offset of line i = sum of preceding line lengths + their newlines.
+      let index = 0;
+      for (let j = 0; j < i; j++) index += cLines[j]!.length + 1;
+      return { original: cLines.slice(i, i + k).join("\n"), index, how };
     }
     if (hits.length > 1) return "ambiguous";
   }
@@ -89,7 +95,12 @@ export function applyEdit(
   }
   const flex = flexibleMatch(content, oldStr);
   if (flex === "ambiguous") return { ok: false, reason: "ambiguous-flex", count: 0 };
-  if (flex) return { ok: true, content: content.replace(flex.original, newStr), how: flex.how, count: 1 };
+  if (flex) {
+    // Splice at the matched offset — NOT content.replace(), which would hit the
+    // first same-looking substring (e.g. inside a longer line) earlier in the file.
+    const updated = content.slice(0, flex.index) + newStr + content.slice(flex.index + flex.original.length);
+    return { ok: true, content: updated, how: flex.how, count: 1 };
+  }
   return { ok: false, reason: "missing", count: 0 };
 }
 

@@ -127,31 +127,75 @@ function normalizeUrl(raw: string): string {
   return url;
 }
 
+/** Classify an IPv4 (as 4 octets) — returns a block reason or null. */
+function ipv4Reason(a: number, b: number, c: number, d: number): string | null {
+  if ([a, b, c, d].some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+  if (a === 127) return "loopback address";
+  if (a === 0) return "unspecified/loopback range";
+  if (a === 10) return "private network (10.x)";
+  if (a === 192 && b === 168) return "private network (192.168.x)";
+  if (a === 172 && b >= 16 && b <= 31) return "private network (172.16–31.x)";
+  if (a === 169 && b === 254) return "link-local address";
+  return null;
+}
+
+/** Try to read a host string as an IPv4 in dotted-quad OR bare-integer form. */
+function ipv4FromHost(host: string): [number, number, number, number] | null {
+  const dotted = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (dotted) return [Number(dotted[1]), Number(dotted[2]), Number(dotted[3]), Number(dotted[4])];
+  // Bare 32-bit integer, e.g. http://2130706433/ == 127.0.0.1
+  if (/^\d+$/.test(host)) {
+    const n = Number(host);
+    if (Number.isFinite(n) && n >= 0 && n <= 0xffffffff) {
+      return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+    }
+  }
+  return null;
+}
+
 /**
  * Refuse URLs that point at the loopback, the link-local cloud-metadata
  * endpoint, or RFC-1918 private ranges. A fetched page can carry an injected
  * "now fetch http://169.254.169.254/…" instruction; this is the cheap floor
  * that stops a coding agent being turned into an SSRF proxy for internal
- * services. Returns a reason string when blocked, null when allowed.
+ * services. Covers dotted-quad, bare-integer, and IPv6 (incl. ::ffff: mapped
+ * IPv4) forms. Returns a reason string when blocked, null when allowed.
  */
 export function ssrfReason(rawUrl: string): string | null {
   let host: string;
   try {
-    host = new URL(normalizeUrl(rawUrl)).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    host = new URL(normalizeUrl(rawUrl)).hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
   } catch {
     return "unparseable URL";
   }
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal")) return "loopback/internal host";
-  if (host === "::1" || host === "0.0.0.0") return "loopback address";
-  if (host === "169.254.169.254" || host === "metadata.google.internal") return "cloud metadata endpoint";
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (m) {
-    const [a, b] = [Number(m[1]), Number(m[2])];
-    if (a === 127) return "loopback address";
-    if (a === 10) return "private network (10.x)";
-    if (a === 192 && b === 168) return "private network (192.168.x)";
-    if (a === 172 && b >= 16 && b <= 31) return "private network (172.16–31.x)";
-    if (a === 169 && b === 254) return "link-local address";
+  if (host === "metadata.google.internal") return "cloud metadata endpoint";
+
+  // IPv6 forms (contain a colon). Block loopback, unspecified, link-local,
+  // unique-local, and IPv4-mapped/embedded addresses that resolve to private v4.
+  if (host.includes(":")) {
+    if (host === "::1" || host === "::") return "IPv6 loopback/unspecified";
+    if (/^fe80:/.test(host)) return "IPv6 link-local";
+    if (/^f[cd][0-9a-f]{2}:/.test(host)) return "IPv6 unique-local";
+    // ::ffff:127.0.0.1  or  ::127.0.0.1  — embedded IPv4: block if it's private.
+    const mapped = host.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+    if (mapped) {
+      const v4 = ipv4FromHost(mapped[1]!);
+      if (v4) {
+        const r = ipv4Reason(...v4);
+        if (r) return `IPv6-embedded ${r}`;
+      }
+    }
+    // ::ffff:7f00:1 style (hex-embedded loopback, 7f00:0001 == 127.0.0.1)
+    if (/(^|:)0*7f[0-9a-f]{2}:/.test(host)) return "IPv6-mapped loopback";
+    return null;
+  }
+
+  const v4 = ipv4FromHost(host);
+  if (v4) {
+    const r = ipv4Reason(...v4);
+    if (r) return r;
+    if (host === "0.0.0.0") return "unspecified address";
   }
   return null;
 }
