@@ -27,15 +27,19 @@ The premise: **a good harness makes a cheap model punch above its weight.** Heav
 
 ## Install
 
+One command (needs [Bun](https://bun.sh)):
+
 ```bash
-git clone https://github.com/acunningham-ship-it/Persoje.git ~/projects/persoje
-cd ~/projects/persoje
-bun install
-bun run compile                       # → dist/persoje (standalone binary)
-ln -sf "$PWD/dist/persoje" ~/.local/bin/persoje
+curl -fsSL https://raw.githubusercontent.com/acunningham-ship-it/Persoje/main/install.sh | bash
 ```
 
-Needs [Bun](https://bun.sh) and an `OPENROUTER_API_KEY` (env var, or the first-run wizard will set it up). [ripgrep](https://github.com/BurntSushi/ripgrep) is used by the grep tool if present.
+Rather read it first? Clone and run the same script — it clones/updates, builds a standalone binary, and symlinks `persoje` onto your PATH (re-run any time to update):
+
+```bash
+git clone https://github.com/acunningham-ship-it/Persoje.git && cd Persoje && ./install.sh
+```
+
+Then run `persoje` — first launch sets up your `OPENROUTER_API_KEY` and model. [ripgrep](https://github.com/BurntSushi/ripgrep) is used by the grep tool if present.
 
 First launch with no config opens a setup wizard: validates your key, lists free tool-capable models, and writes `~/.config/persoje/config.json`.
 
