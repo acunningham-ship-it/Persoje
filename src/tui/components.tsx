@@ -230,15 +230,27 @@ export function CommandMenu({
   selected: number;
 }): React.ReactElement {
   const width = Math.max(...items.map((c) => c.name.length)) + 1;
+  const WINDOW = 8;
+  // Scroll the visible window so the selected row is always shown (it can run
+  // past WINDOW when many commands match, e.g. typing just "/").
+  const start =
+    items.length <= WINDOW ? 0 : Math.min(Math.max(0, selected - Math.floor(WINDOW / 2)), items.length - WINDOW);
+  const visible = items.slice(start, start + WINDOW);
   return (
     <Box flexDirection="column" marginLeft={2}>
-      {items.slice(0, 8).map((c, i) => (
-        <Text key={c.name}>
-          <Text color={i === selected ? theme.accent : "gray"}>{i === selected ? "▸ " : "  "}</Text>
-          <Text color={i === selected ? theme.accent : undefined}>{c.name.padEnd(width)}</Text>
-          <Text dimColor> {c.args ? c.args + "  " : ""}{c.desc}</Text>
-        </Text>
-      ))}
+      {start > 0 ? <Text dimColor>{`  ↑ ${start} more`}</Text> : null}
+      {visible.map((c, i) => {
+        const idx = start + i;
+        const sel = idx === selected;
+        return (
+          <Text key={c.name}>
+            <Text color={sel ? theme.accent : "gray"}>{sel ? "▸ " : "  "}</Text>
+            <Text color={sel ? theme.accent : undefined}>{c.name.padEnd(width)}</Text>
+            <Text dimColor> {c.args ? c.args + "  " : ""}{c.desc}</Text>
+          </Text>
+        );
+      })}
+      {start + WINDOW < items.length ? <Text dimColor>{`  ↓ ${items.length - start - WINDOW} more`}</Text> : null}
     </Box>
   );
 }

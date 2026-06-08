@@ -870,7 +870,8 @@ export function App({
     }
     if (key.upArrow) {
       if (menuVisible) {
-        setMenuSelected((s) => Math.max(0, s - 1));
+        // wrap to bottom when going up past the top
+        setMenuSelected((s) => (s - 1 + menuItems.length) % menuItems.length);
       } else {
         const idx = Math.min(historyIdx + 1, history.length - 1);
         if (history[idx] !== undefined) {
@@ -882,7 +883,8 @@ export function App({
     }
     if (key.downArrow) {
       if (menuVisible) {
-        setMenuSelected((s) => Math.min(menuItems.length - 1, s + 1));
+        // wrap to top when going down past the bottom
+        setMenuSelected((s) => (s + 1) % menuItems.length);
       } else {
         const idx = historyIdx - 1;
         setHistoryIdx(idx);
