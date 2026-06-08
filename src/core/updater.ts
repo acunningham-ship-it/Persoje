@@ -103,9 +103,11 @@ export async function preLaunchUpdate(args: string[], onStatus?: (msg: string) =
   const pull = git(`pull --ff-only origin ${branch}`, root, 30_000);
   if (pull === null) return; // diverged — skip silently
 
-  // Rebuild the binary in-place
+  // Rebuild the binary. Must match the install symlink target + the
+  // `bun run compile` script (dist/persoje) so the update sticks for the
+  // persistent `persoje` command, not just this re-exec'd session.
   try {
-    execSync("bun build --compile --minify src/cli.ts --outfile persoje", {
+    execSync("bun build --compile --minify src/cli.ts --outfile dist/persoje", {
       cwd: root,
       timeout: 60_000,
       encoding: "utf8",
@@ -115,9 +117,8 @@ export async function preLaunchUpdate(args: string[], onStatus?: (msg: string) =
     return; // rebuild failed — skip silently, run old version
   }
 
-  // Install step: if the binary is symlinked (e.g., ~/.local/bin/persoje),
-  // the symlink already points to <root>/persoje which we just rebuilt.
-  // No extra install step needed.
+  // The install symlink (~/.local/bin/persoje → <root>/dist/persoje) already
+  // points at what we just rebuilt — no extra install step needed.
 
   onStatus?.(`updated ${local.slice(0, 7)} → ${remote.slice(0, 7)}`);
 
@@ -128,7 +129,7 @@ export async function preLaunchUpdate(args: string[], onStatus?: (msg: string) =
   try {
     // On Linux/macOS, Bun supports Bun.spawn + process.exit pattern,
     // but the cleanest approach is execv via spawn + exit:
-    const binaryPath = resolve(root, "persoje");
+    const binaryPath = resolve(root, "dist", "persoje");
     const proc = Bun.spawn([binaryPath, ...cleanArgs.slice(2)], {
       stdin: "inherit",
       stdout: "inherit",
