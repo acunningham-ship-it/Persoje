@@ -34,18 +34,22 @@ Exit code is non-zero if any scored task failed, so it drops into CI.
 
 ## Reference run
 
-On the free `openrouter/owl-alpha` model (no `--judge` skips nothing here —
-shown with it on), observed this session:
+A full `--judge` run on the free `openrouter/owl-alpha` model:
 
 | task | kind | result | turns | tok/turn | cost |
 |---|---|:--:|--:|--:|--:|
-| bugfix | assert | ✅ | 4 | ~2,015 | $0 |
-| feature-add | assert | ✅ | 6 | ~2,153 | $0 |
-| multi-edit-rename | assert | ✅ | 4 | ~2,015 | $0 |
+| bugfix | assert | ✅ | 4 | ~2,085 | $0 |
+| feature-add | assert | ❌ | 1 | ~1,854 | $0 |
+| multi-edit-rename | assert | ✅ | 4 | ~2,013 | $0 |
 | explain-code | judge | ✅ | 2 | ~1,846 | $0 |
+| web-lookup | judge | ✅ | 3 | ~3,096 | $0 |
 
-A free model finishing real coding tasks (run→fix→verify, write+run a test,
-rename across a file) at ~2k tokens/turn, $0. Rerun with your own model:
+**4/5**, at ~2k tokens/turn, $0. A free model fixes a bug end to end, renames
+across a file, explains code, and looks a fact up on the web with the tools.
+It's a flaky free tier, so it's not a clean sweep every run — `feature-add`
+(write + run your own test) is the one that wobbles; across two runs it went
+1/2 while the other four held. That's the whole point of an eval harness: it
+reports exactly what passed instead of hand-waving. Rerun with your own model:
 `bun run evals/run.ts --model <id> --judge`.
 
 ## Tasks
