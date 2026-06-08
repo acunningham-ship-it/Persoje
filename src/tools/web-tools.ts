@@ -71,6 +71,31 @@ export function extractTitle(html: string): string {
   return m ? decodeEntities(m[1]!.replace(/<[^>]+>/g, "").trim()) : "";
 }
 
+/**
+ * Read a response body but stop after `maxBytes` — streaming, so a 50MB page
+ * never fully lands in memory. We only need the first chunk of a doc page; the
+ * result is truncated to the tool's token cap downstream anyway.
+ */
+async function readCapped(res: Response, maxBytes: number): Promise<string> {
+  if (!res.body) return (await res.text()).slice(0, maxBytes * 4);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  let out = "";
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      out += decoder.decode(value, { stream: true });
+      if (total >= maxBytes) break;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return out;
+}
+
 async function fetchText(url: string, signal?: AbortSignal): Promise<{ body: string; contentType: string; finalUrl: string }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
@@ -84,9 +109,7 @@ async function fetchText(url: string, signal?: AbortSignal): Promise<{ body: str
     });
     if (!res.ok) throw new ToolError(`HTTP ${res.status} ${res.statusText} for ${url}`);
     const contentType = res.headers.get("content-type") ?? "";
-    const buf = await res.arrayBuffer();
-    const slice = buf.byteLength > MAX_BYTES ? buf.slice(0, MAX_BYTES) : buf;
-    const body = new TextDecoder("utf-8", { fatal: false }).decode(slice);
+    const body = await readCapped(res, MAX_BYTES);
     return { body, contentType, finalUrl: res.url || url };
   } catch (e) {
     if (e instanceof ToolError) throw e;
