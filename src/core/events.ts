@@ -13,7 +13,7 @@ export interface UsageReport {
   durationMs: number;
 }
 
-export type TurnEndReason = "done" | "max-iterations" | "cancelled" | "error";
+export type TurnEndReason = "done" | "max-iterations" | "cancelled" | "error" | "budget";
 
 export type AgentEvent =
   | { type: "turn-start"; turn: number }

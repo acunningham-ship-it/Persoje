@@ -28,6 +28,10 @@ forgivingly — and you can see every change it makes.
   prompt from args or stdin, only the final result on stdout, `--json` for a
   structured `{text,tools,tokens,cost}` object.
 
+- **Cost ceiling.** `/budget <usd>` (or `loop.maxCostUsd`) sets a hard
+  session spend cap; the turn halts before the next model call once it's hit —
+  the safety net autonomous/long runs were missing. `/budget off` to disable.
+
 **Improved**
 - **Edits don't loop on near-misses.** When `old_string` isn't an exact
   match, the edit tool falls back to a line-level match that ignores trailing

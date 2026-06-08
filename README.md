@@ -123,6 +123,7 @@ On launch (throttled to once every 4 hours, clean working tree only) Persoje fet
 /plan [on|off]     plan mode — spec before acting
 /effort low|mid|high|max    reasoning depth
 /cost              session token + cost totals
+/budget [usd|off]  cost ceiling — halts the turn when reached
 /status            model, session, memory, router at a glance
 /config            show resolved config
 /permissions [clear]        always-allowed tools

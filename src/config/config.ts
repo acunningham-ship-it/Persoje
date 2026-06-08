@@ -41,6 +41,9 @@ const ConfigSchema = z.object({
       stuckLimit: z.number().default(10),
       /** Bash tool timeout in ms. */
       bashTimeoutMs: z.number().default(60_000),
+      /** Hard session cost ceiling in USD — the turn halts once accumulated cost
+       *  reaches it (the safety net for autonomous/long runs). 0 = unlimited. */
+      maxCostUsd: z.number().default(0),
     })
     .prefault({}),
   retry: z

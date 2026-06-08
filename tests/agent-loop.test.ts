@@ -72,6 +72,40 @@ test("executes a tool call then continues to completion", async () => {
   expect(toolMsg?.tool_call_id).toBe("c1");
 });
 
+test("cost ceiling halts the turn before the next model call", async () => {
+  const registry = new ToolRegistry();
+  registry.register(readTool);
+  // One pricey call ($0.01) that makes a tool call, so the loop comes back for
+  // a second iteration — where the ceiling ($0.005) is already exceeded.
+  const pricey = { ...usage, usage: { ...usage.usage, cost: 0.01 } };
+  const client = fakeClient([
+    [
+      { type: "tool-calls", calls: [{ id: "c1", name: "read", argsJson: JSON.stringify({ path: "/etc/hostname" }) }] },
+      pricey,
+    ],
+    [{ type: "text", delta: "should never run" }, usage],
+  ]);
+  const config = makeConfig();
+  config.loop.maxCostUsd = 0.005;
+  const agent = new Agent({ client, tools: registry, config, cwd: "/tmp" });
+  const events = await collect(agent.run("do expensive work"));
+
+  expect(events.find((e) => e.type === "turn-end")).toMatchObject({ reason: "budget" });
+  const err = events.find((e) => e.type === "error") as any;
+  expect(err?.message).toContain("cost ceiling");
+  // It stopped at iteration 1 — the second model call never happened.
+  expect(events.filter((e) => e.type === "text-delta")).toHaveLength(0);
+});
+
+test("zero cost ceiling means unlimited (no halt)", async () => {
+  const client = fakeClient([[{ type: "text", delta: "done" }, { ...usage, usage: { ...usage.usage, cost: 5 } }]]);
+  const config = makeConfig();
+  config.loop.maxCostUsd = 0; // unlimited
+  const agent = new Agent({ client, tools: new ToolRegistry(), config, cwd: "/tmp" });
+  const events = await collect(agent.run("hi"));
+  expect(events.find((e) => e.type === "turn-end")).toMatchObject({ reason: "done" });
+});
+
 test("unknown tool returns an error result to the model instead of crashing", async () => {
   const client = fakeClient([
     [{ type: "tool-calls", calls: [{ id: "c1", name: "made_up_tool", argsJson: "{}" }] }, usage],

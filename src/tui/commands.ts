@@ -17,6 +17,7 @@ export const COMMANDS: CommandMeta[] = [
   { name: "/router", args: "on|off|auto|offer", desc: "toggle model routing & escalation" },
   { name: "/canary", desc: "re-run the 3-prompt smoke test on the current model" },
   { name: "/cost", desc: "session token + cost totals" },
+  { name: "/budget", args: "[usd|off]", desc: "show or set the session cost ceiling (halts the turn when hit)" },
   { name: "/status", desc: "model, session, memory, router — everything at a glance" },
   { name: "/config", desc: "show resolved config" },
   { name: "/permissions", args: "[clear]", desc: "show or clear always-allowed tools" },
@@ -51,7 +52,7 @@ export const COMMANDS: CommandMeta[] = [
  * turn. Everything else queues until the turn finishes.
  */
 export const LIVE_SAFE = new Set<string>([
-  "/help", "/cost", "/status", "/config", "/permissions", "/sessions",
+  "/help", "/cost", "/budget", "/status", "/config", "/permissions", "/sessions",
   "/memory", "/skills", "/lessons", "/quirks", "/repomap", "/stats",
   "/diff", "/copy", "/models", "/theme", "/effort", "/router", "/goal",
   "/exit", "/quit",

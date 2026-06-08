@@ -661,6 +661,33 @@ export function App({
           });
           break;
         }
+        case "/budget": {
+          const arg = (rest[0] ?? "").toLowerCase();
+          const cur = config.loop.maxCostUsd ?? 0;
+          const spent = agent.accounting.totals().cost;
+          if (!arg) {
+            push({
+              kind: "info",
+              text:
+                cur > 0
+                  ? `cost ceiling: $${cur.toFixed(2)} · spent this session: ${fmtCost(spent)} (${Math.round((spent / cur) * 100)}%)\nthe turn halts when spend hits the ceiling — /budget <usd> to change, /budget off to disable`
+                  : `no cost ceiling set (unlimited) · spent this session: ${fmtCost(spent)}\n/budget <usd> sets a hard cap that halts the turn when reached`,
+            });
+            break;
+          }
+          const next = arg === "off" || arg === "0" ? 0 : Number(arg.replace(/^\$/, ""));
+          if (!Number.isFinite(next) || next < 0) {
+            push({ kind: "error", text: `invalid amount "${rest[0]}" — usage: /budget 5  or  /budget off` });
+            break;
+          }
+          config.loop.maxCostUsd = next;
+          void setConfigValue("loop", "maxCostUsd", next).catch(() => {});
+          push({
+            kind: "info",
+            text: next > 0 ? `▸ cost ceiling → $${next.toFixed(2)} (saved)` : "▸ cost ceiling disabled (unlimited, saved)",
+          });
+          break;
+        }
         case "/status": {
           const p = profiles.get(agent.model);
           const t = agent.accounting.totals();

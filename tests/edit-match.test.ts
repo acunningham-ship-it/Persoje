@@ -64,7 +64,7 @@ describe("applyEdit", () => {
   });
 
   test("reports missing when nothing matches", () => {
-    expect(applyEdit("nothing\n", "absent")).toEqual({ ok: false, reason: "missing", count: 0 });
+    expect(applyEdit("nothing\n", "absent", "x")).toEqual({ ok: false, reason: "missing", count: 0 });
   });
 });
 

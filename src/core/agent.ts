@@ -228,6 +228,23 @@ export class Agent {
           yield { type: "turn-end", reason: "cancelled", iterations };
           return;
         }
+
+        // Cost ceiling: the safety net for autonomous/long runs. Checked before
+        // each model call so we never spend past the limit (refusing to even
+        // start a turn that's already over budget).
+        const ceiling = config.loop.maxCostUsd;
+        if (ceiling > 0) {
+          const spent = this.accounting.totals().cost;
+          if (spent >= ceiling) {
+            yield {
+              type: "error",
+              message: `Session cost ceiling reached ($${spent.toFixed(4)} ≥ $${ceiling.toFixed(2)}). Raise it with /budget <usd> (or set loop.maxCostUsd) to continue.`,
+              fatal: false,
+            };
+            yield { type: "turn-end", reason: "budget", iterations };
+            return;
+          }
+        }
         iterations++;
 
         // Token discipline: compact before the call once history crosses the
