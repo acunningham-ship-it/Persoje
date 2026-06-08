@@ -7,6 +7,7 @@ import type { SessionStore } from "../session/store.ts";
 import type { Router, ProfileStore } from "../router/router.ts";
 import type { OpenRouterClient } from "../models/openrouter.ts";
 import type { PersojeConfig } from "../config/config.ts";
+import { setDefaultModel } from "../config/config.ts";
 import type { LessonLog } from "../memory/lessons.ts";
 import type { FactStore } from "../memory/facts.ts";
 import type { SkillLibrary } from "../memory/skills.ts";
@@ -447,13 +448,25 @@ export function App({
         case "/model":
           if (rest[0]) {
             agent.model = rest[0];
-            push({ kind: "info", text: `model → ${rest[0]}` });
+            push({ kind: "info", text: `model → ${rest[0]} (this session; /dmodel to make it the default)` });
             void maybeCanary(rest[0]);
           } else {
             const p = profiles.get(agent.model);
             const canary = p.canary ? ` · canary ${p.canary.score}/${p.canary.total}` : " · not canaried";
             push({ kind: "info", text: `model: ${agent.model} (${p.toolQuality}${canary})` });
           }
+          break;
+        case "/dmodel":
+          if (!rest[0]) {
+            push({ kind: "info", text: `default model: ${config.model.primary} — usage: /dmodel <id> to change it for all new sessions` });
+            break;
+          }
+          agent.model = rest[0]; // apply now too
+          void setDefaultModel(rest[0]).then(
+            () => push({ kind: "info", text: `default model → ${rest[0]} (saved; used in every new session)` }),
+            (e) => push({ kind: "error", text: `couldn't save default: ${(e as Error).message}` }),
+          );
+          void maybeCanary(rest[0]);
           break;
         case "/router":
           if (rest[0] === "on") router.enabled = true;

@@ -6,7 +6,8 @@ export interface CommandMeta {
 }
 
 export const COMMANDS: CommandMeta[] = [
-  { name: "/model", args: "[id]", desc: "show model + profile, or switch" },
+  { name: "/model", args: "[id]", desc: "show model + profile, or switch (this session only)" },
+  { name: "/dmodel", args: "<id>", desc: "set the default model (persists to config, all new sessions)" },
   { name: "/router", args: "on|off|auto|offer", desc: "toggle model routing & escalation" },
   { name: "/canary", desc: "re-run the 3-prompt smoke test on the current model" },
   { name: "/cost", desc: "session token + cost totals" },

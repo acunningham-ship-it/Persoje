@@ -150,3 +150,15 @@ export function resolveApiKey(config: PersojeConfig): string {
   }
   return key;
 }
+
+/**
+ * Persist the default primary model to the global config (preserving every other
+ * key). This is what `/dmodel` writes, so the choice survives across sessions —
+ * unlike `/model`, which only changes the running session.
+ */
+export async function setDefaultModel(modelId: string): Promise<string> {
+  const existing = (await readJsonIfExists(GLOBAL_CONFIG_PATH)) ?? {};
+  const model = { ...((existing.model as Record<string, unknown>) ?? {}), primary: modelId };
+  await Bun.write(GLOBAL_CONFIG_PATH, JSON.stringify({ ...existing, model }, null, 2) + "\n");
+  return GLOBAL_CONFIG_PATH;
+}
