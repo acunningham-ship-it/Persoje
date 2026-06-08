@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="820" height="420" viewBox="0 0 820 420" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="430" viewBox="0 0 840 430" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
   <defs>
     <linearGradient id="amber" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#e8a317"/>
@@ -10,33 +10,37 @@
     </linearGradient>
   </defs>
 
-  <rect width="820" height="420" rx="14" fill="#0f1115"/>
+  <rect width="840" height="430" rx="14" fill="#0f1115"/>
 
-  <!-- title -->
-  <text x="40" y="52" fill="#f4f4f5" font-size="24" font-weight="700">Tokens sent per turn</text>
-  <text x="40" y="78" fill="#9aa0a6" font-size="14">same model (openrouter/owl-alpha), same coding tasks · from OpenRouter request logs</text>
+  <text x="40" y="50" fill="#f4f4f5" font-size="23" font-weight="700">Context size per turn</text>
+  <text x="40" y="76" fill="#9aa0a6" font-size="13.5">same model (openrouter/owl-alpha), same coding tasks · observed range with median ◆ · from OpenRouter logs</text>
 
-  <!-- scale baseline -->
-  <line x1="210" y1="120" x2="210" y2="300" stroke="#2a2d34" stroke-width="1"/>
+  <!-- scale 0..290k over x 200..780 -->
+  <line x1="200" y1="110" x2="200" y2="300" stroke="#2a2d34" stroke-width="1"/>
 
-  <!-- Hermes bar (≈144k of a 150k scale) -->
-  <text x="190" y="172" fill="#e8a8a8" font-size="15" text-anchor="end" font-weight="600">Hermes Agent</text>
-  <rect x="210" y="150" width="560" height="40" rx="6" fill="url(#hermes)"/>
-  <text x="760" y="175" fill="#ffffff" font-size="16" text-anchor="end" font-weight="700">~144,000</text>
+  <!-- Hermes range bar 17k..288k, median ~143k -->
+  <text x="184" y="166" fill="#e8a8a8" font-size="15" text-anchor="end" font-weight="600">Hermes Agent</text>
+  <rect x="234" y="146" width="542" height="36" rx="6" fill="url(#hermes)" opacity="0.85"/>
+  <polygon points="486,140 492,150 480,150" fill="#ffd2d2"/>
+  <line x1="486" y1="146" x2="486" y2="182" stroke="#ffd2d2" stroke-width="2"/>
+  <text x="240" y="170" fill="#ffe6e6" font-size="13">17k</text>
+  <text x="770" y="170" fill="#ffffff" font-size="14" text-anchor="end" font-weight="700">288k</text>
+  <text x="486" y="132" fill="#ffd2d2" font-size="12" text-anchor="middle">median ~143k</text>
 
-  <!-- Persoje bar (≈15k → 58px) -->
-  <text x="190" y="262" fill="#ffcf6b" font-size="15" text-anchor="end" font-weight="600">Persoje</text>
-  <rect x="210" y="240" width="58" height="40" rx="6" fill="url(#amber)"/>
-  <text x="280" y="265" fill="#ffcf6b" font-size="16" font-weight="700">~15,000</text>
-  <text x="372" y="265" fill="#9aa0a6" font-size="13">(often 1–10k early in a session)</text>
+  <!-- Persoje range bar 1k..25k, median ~12k -->
+  <text x="184" y="256" fill="#ffcf6b" font-size="15" text-anchor="end" font-weight="600">Persoje</text>
+  <rect x="202" y="236" width="48" height="36" rx="6" fill="url(#amber)"/>
+  <polygon points="224,230 230,240 218,240" fill="#fff3d6"/>
+  <line x1="224" y1="236" x2="224" y2="272" stroke="#fff3d6" stroke-width="2"/>
+  <text x="262" y="259" fill="#ffcf6b" font-size="14" font-weight="700">1k – 25k</text>
+  <text x="224" y="222" fill="#ffcf6b" font-size="12" text-anchor="middle">median ~12k</text>
 
   <!-- scale ticks -->
-  <text x="210" y="320" fill="#5b6068" font-size="11" text-anchor="middle">0</text>
-  <text x="490" y="320" fill="#5b6068" font-size="11" text-anchor="middle">75k</text>
-  <text x="770" y="320" fill="#5b6068" font-size="11" text-anchor="middle">150k</text>
+  <text x="200" y="320" fill="#5b6068" font-size="11" text-anchor="middle">0</text>
+  <text x="490" y="320" fill="#5b6068" font-size="11" text-anchor="middle">145k</text>
+  <text x="780" y="320" fill="#5b6068" font-size="11" text-anchor="middle">290k</text>
 
-  <!-- callout -->
-  <text x="40" y="372" fill="#e8a317" font-size="20" font-weight="700">≈ 10× leaner</text>
-  <text x="200" y="372" fill="#f4f4f5" font-size="16">~90% fewer tokens per turn — and Hermes peaked at 288k while Persoje held flat.</text>
-  <text x="40" y="398" fill="#5b6068" font-size="12">Hermes replays full history + untruncated tool output every turn. Persoje: goal anchor + recent turns + summary, capped tool results, swap-to-disk transcript.</text>
+  <text x="40" y="372" fill="#e8a317" font-size="20" font-weight="700">≈ 12× leaner per turn</text>
+  <text x="232" y="372" fill="#f4f4f5" font-size="15">median ~143k vs ~12k. Persoje's whole range sits below where Hermes even starts.</text>
+  <text x="40" y="400" fill="#5b6068" font-size="12">Both auto-compact — but Hermes lets context grow to ~280k first. Persoje keeps a lean working set: goal anchor + recent turns + summary, capped tool output, swap-to-disk transcript.</text>
 </svg>

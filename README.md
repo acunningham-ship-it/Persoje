@@ -2,11 +2,11 @@
 
 A token-efficient agentic coding CLI for [OpenRouter](https://openrouter.ai). Point it at *any* model — a free stealth preview, a small open model, or a frontier one — and a lean harness keeps it honest and keeps your context small.
 
-The premise: **a good harness makes a cheap model punch above its weight.** Naive agents (Hermes-style) replay the entire conversation plus untruncated tool output on every turn and burn 150k+ tokens a turn. Persoje runs the same model at a fraction of that.
+The premise: **a good harness makes a cheap model punch above its weight.** Heavier agents replay the whole conversation plus untruncated tool output and let context balloon before compacting. Persoje keeps a lean working set, so the same model runs at a fraction of the tokens per turn.
 
-![Tokens per turn: Hermes ~144k vs Persoje ~15k](docs/token-comparison.svg)
+![Context per turn: Hermes 17k–288k (median ~143k) vs Persoje 1k–25k (median ~12k)](docs/token-comparison.svg)
 
-> Same model (`openrouter/owl-alpha`), same coding tasks, measured from OpenRouter request logs. Persoje runs ~10× leaner and stays flat as a session grows, while Hermes is pinned near its context limit from turn one.
+> Same model (`openrouter/owl-alpha`), same coding tasks, measured from OpenRouter request logs. Both harnesses auto-compact — but Hermes lets context grow to ~280k before it does, so its turns sit at a median ~143k. Persoje keeps a bounded working set (goal + recent turns + summary, capped tool output, swap-to-disk transcript) and runs ~12× leaner per turn — its entire observed range sits below where Hermes even starts.
 
 ```
 ❯ fix the failing test in calc.py
