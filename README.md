@@ -9,6 +9,8 @@ The premise: **a good harness makes a cheap model punch above its weight.** Heav
 > Same model, same coding tasks, from OpenRouter request logs against a conventional full-replay agent. Both auto-compact — but the conventional agent lets context grow to ~280k first (median ~143k/turn); Persoje keeps a bounded working set and runs ~12× leaner.
 >
 > For a **reproducible, apples-to-apples** number, [`bench/`](bench/) runs the *same* harness and model with Persoje's token discipline on vs off. Honest result: on tiny tasks it's a wash, but on work with large tool output it's **~2.4× leaner per turn with a 69% smaller peak**, and the gap widens with session length. The discipline earns its keep on real debugging, not three-turn toys.
+>
+> Lean is only half the story — [`evals/`](evals/) checks the agent actually *finishes* the task (run → fix → verify, add a feature + test, rename across a file, explain code, look something up on the web), scoring completion deterministically (command exits 0) or via an LLM judge, with tokens/turn reported alongside.
 
 ```
 ❯ fix the failing test in calc.py

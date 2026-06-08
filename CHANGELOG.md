@@ -31,6 +31,10 @@ forgivingly — and you can see every change it makes.
 - **Cost ceiling.** `/budget <usd>` (or `loop.maxCostUsd`) sets a hard
   session spend cap; the turn halts before the next model call once it's hit —
   the safety net autonomous/long runs were missing. `/budget off` to disable.
+- **Eval harness** (`evals/`). Runs the real agent on fixture coding tasks and
+  scores *completion* — deterministically (command exits 0 / file checks) or via
+  an LLM judge (`--judge`) — with tokens/turn reported alongside. On free
+  owl-alpha the assert suite passes 3/3 at ~2k tokens/turn, $0.
 
 **Improved**
 - **Edits don't loop on near-misses.** When `old_string` isn't an exact

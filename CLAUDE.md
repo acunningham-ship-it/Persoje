@@ -20,6 +20,7 @@ bunx tsc --noEmit        # typecheck (keep src clean; a few test-file strict-nul
 bun run start            # run from source
 bun run compile          # → dist/persoje (standalone binary)
 bun run bench/run.ts --model <id>   # reproducible lean-vs-naive token benchmark
+bun run evals/run.ts [--judge]      # task-completion evals (assert + LLM-judge); needs a key
 ```
 
 ## Architecture
