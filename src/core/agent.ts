@@ -86,6 +86,51 @@ export class Agent {
     });
   }
 
+  /**
+   * Reflexion: turn a failure (or a user correction) into a concrete, reusable
+   * lesson + an optional note about the model's own misbehavior. One cheap-model
+   * call over the recent transcript. This is what makes self-improvement learn
+   * something real instead of logging "ended with max-iterations".
+   */
+  async reflect(problem: string): Promise<{ lesson: string; quirk: string }> {
+    const { client, config } = this.deps;
+    const transcript = this.context
+      .history()
+      .slice(-14)
+      .map((m) => {
+        if (m.role === "tool") return `[tool result] ${(m.content ?? "").slice(0, 200)}`;
+        if (m.role === "assistant" && "tool_calls" in m && m.tool_calls?.length)
+          return `assistant: ${m.content}\n[called: ${m.tool_calls.map((c) => c.function.name).join(", ")}]`;
+        return `${m.role}: ${(m.content ?? "").slice(0, 400)}`;
+      })
+      .join("\n");
+
+    let raw = "";
+    const stream = client.stream({
+      model: config.model.compactor || config.model.primary,
+      messages: [
+        {
+          role: "user",
+          content:
+            `A coding-agent turn went wrong. Problem: ${problem}\n\nRecent transcript:\n${transcript}\n\n` +
+            `Reply with ONLY JSON: {"lesson": "one concrete, actionable rule to avoid this next time — imperative, <=30 words", ` +
+            `"quirk": "if the MODEL itself misbehaved (malformed tool calls, looping, ignoring instructions), one short note about it; otherwise empty string"}`,
+        },
+      ],
+      maxTokens: 250,
+      temperature: 0,
+    });
+    for await (const ev of stream) if (ev.type === "text") raw += ev.delta;
+
+    try {
+      const m = raw.match(/\{[\s\S]*\}/);
+      const obj = JSON.parse(m ? m[0] : raw) as { lesson?: string; quirk?: string };
+      return { lesson: String(obj.lesson ?? "").trim(), quirk: String(obj.quirk ?? "").trim() };
+    } catch {
+      return { lesson: raw.trim().slice(0, 200), quirk: "" };
+    }
+  }
+
   /** Install/replace the approval hook after construction (the TUI does this). */
   setApprover(approve: AgentDeps["approve"]): void {
     this.deps.approve = approve;
@@ -135,7 +180,10 @@ export class Agent {
 
     let iterations = 0;
     let deadIters = 0; // consecutive iterations that made tool calls but ALL errored
-    const DEAD_LIMIT = 8; // circuit breaker — guarantees termination even when maxIter = 0
+    // NOT an iteration cap — productive turns run unbounded. This only catches a
+    // model purely flailing (every call errors, zero progress) so it can't spin
+    // forever, which matters most in headless/autonomous mode. 0 = never stop.
+    const DEAD_LIMIT = config.loop.stuckLimit ?? 10;
     const loops = new LoopDetector();
     const maxIter = config.loop.maxIterations; // 0 = unlimited
     try {
@@ -245,7 +293,7 @@ export class Agent {
         // nothing succeeds, stop — otherwise an unlimited (maxIter=0) turn spins
         // forever on a confused model (e.g. malformed tool names).
         deadIters = !anyOk && anyErr ? deadIters + 1 : 0;
-        if (deadIters >= DEAD_LIMIT) {
+        if (DEAD_LIMIT >= 1 && deadIters >= DEAD_LIMIT) {
           yield {
             type: "error",
             message: `Stopped: ${DEAD_LIMIT} straight rounds of tool errors with no progress. The model may be stuck — try rephrasing, a stronger model, or /clear.`,

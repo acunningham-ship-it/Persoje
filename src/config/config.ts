@@ -30,8 +30,11 @@ const ConfigSchema = z.object({
     .prefault({}),
   loop: z
     .object({
-      /** Max model-call iterations per user turn. 0 = unlimited (work until done, loop guard stops repeats). */
+      /** Max model-call iterations per user turn. 0 = unlimited (work until done). */
       maxIterations: z.number().default(0),
+      /** Safety stop ONLY for a stuck model: N consecutive rounds where every tool
+       *  call errors and nothing succeeds. Not a productive cap. 0 = never stop. */
+      stuckLimit: z.number().default(10),
       /** Bash tool timeout in ms. */
       bashTimeoutMs: z.number().default(60_000),
     })

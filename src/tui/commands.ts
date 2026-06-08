@@ -16,6 +16,8 @@ export const COMMANDS: CommandMeta[] = [
   { name: "/resume", args: "[name|number]", desc: "interactive session picker, or resume by name/number" },
   { name: "/compact", desc: "summarize old history now" },
   { name: "/clear", desc: "clear conversation history" },
+  { name: "/good", args: "[note]", desc: "mark the last turn as good — positive signal for learning" },
+  { name: "/bad", args: "[why]", desc: "mark the last turn as wrong — agent reflects into a lesson" },
   { name: "/init", desc: "explore the project and write .persoje/PERSOJE.md" },
   { name: "/goal", args: "[text|clear]", desc: "show, set, or clear the pinned session goal" },
   { name: "/memory", args: "[slug]", desc: "list memory facts, or show one" },

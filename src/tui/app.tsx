@@ -180,6 +180,7 @@ export function App({
   const alwaysAllow = useRef(new Set<string>());
   const streamBuf = useRef("");
   const toolArgs = useRef(new Map<string, string>()); // call id → args preview
+  const lastTaskRef = useRef(""); // most recent user task, for /good and /bad
 
   const menuItems = !busy && !pending ? filterCommands(input) : [];
   const menuVisible = menuItems.length > 0;
@@ -307,12 +308,35 @@ export function App({
     return () => clearInterval(t);
   }, []);
 
+  // Reflexion: turn a failure or a user correction into a real lesson + model
+  // quirk, via the cheap model. Shared by auto-failure handling and /bad.
+  const learnFromTurn = useCallback(
+    async (task: string, error: string, problem: string) => {
+      try {
+        const { lesson, quirk } = await agent.reflect(problem);
+        if (lesson) {
+          lessons.append({ task: task.slice(0, 120), error, lesson, model: agent.model });
+          push({ kind: "info", text: `📝 learned: ${lesson}` });
+        }
+        if (quirk) {
+          profiles.addQuirk(agent.model, quirk);
+          facts.addQuirk(agent.model, quirk);
+          push({ kind: "info", text: `🧠 noted about ${agent.model}: ${quirk}` });
+        }
+      } catch {
+        /* reflection is best-effort */
+      }
+    },
+    [agent, lessons, profiles, facts, push],
+  );
+
   const runTurn = useCallback(
     async (task: string) => {
       setBusy(true);
       setBusyLabel("thinking");
       setBusyStart(Date.now());
       push({ kind: "user", text: task });
+      lastTaskRef.current = task;
       store.maybeSetTitle(sessionId, task);
       // Update session title state for terminal header + banner
       const meta = store.get(sessionId);
@@ -377,14 +401,14 @@ export function App({
               if (ev.reason === "max-iterations") push({ kind: "info", text: `stopped after ${ev.iterations} iterations` });
               if (ev.reason === "cancelled") push({ kind: "info", text: "turn cancelled" });
               setTurnIterations(0);
-              // Failed turns become lessons; `persoje dream` curates them later.
+              // Failed turns get a real reflexion lesson (not telemetry), plus a
+              // model quirk if the model itself misbehaved. `persoje dream` curates later.
               if (ev.reason === "max-iterations" || ev.reason === "error") {
-                lessons.append({
-                  task: task.slice(0, 120),
-                  error: ev.reason,
-                  lesson: `Turn ended with ${ev.reason} after ${ev.iterations} iterations`,
-                  model: agent.model,
-                });
+                const problem =
+                  ev.reason === "max-iterations"
+                    ? `ran ${ev.iterations} iterations without finishing the task`
+                    : "the turn errored out";
+                void learnFromTurn(task, ev.reason, problem);
               }
               break;
           }
@@ -396,7 +420,7 @@ export function App({
         abortRef.current = null;
       }
     },
-    [agent, lessons, push, sessionId, store],
+    [agent, learnFromTurn, push, sessionId, store],
   );
 
   const handleCommand = useCallback(
@@ -527,6 +551,25 @@ export function App({
           agent.context.clear();
           push({ kind: "info", text: "history cleared" });
           break;
+        case "/bad": {
+          // strongest learning signal: a human says the last turn was wrong.
+          const why = rest.join(" ").trim();
+          push({ kind: "info", text: "reflecting on what went wrong…" });
+          void learnFromTurn(lastTaskRef.current, "user-flagged", why || "the user said the last response was wrong or unhelpful");
+          break;
+        }
+        case "/good": {
+          // positive signal — record what worked so `dream` can promote it.
+          const note = rest.join(" ").trim();
+          lessons.append({
+            task: lastTaskRef.current.slice(0, 120),
+            error: "success",
+            lesson: `worked${note ? " (" + note + ")" : ""}: ${lastTaskRef.current.slice(0, 100)}`,
+            model: agent.model,
+          });
+          push({ kind: "info", text: "👍 noted — saved as a positive signal for the next dream pass" });
+          break;
+        }
         case "/init":
           void runTurn(
             "Explore this project (ls, glob, read the key files) and then use the write tool to create .persoje/PERSOJE.md: " +
@@ -777,7 +820,7 @@ export function App({
         }
       }
     },
-    [agent, client, config, cwd, exit, facts, lessons, maybeCanary, profiles, push, router, runTurn, sessionId, skills, store, mcp],
+    [agent, client, config, cwd, exit, facts, lessons, learnFromTurn, maybeCanary, profiles, push, router, runTurn, sessionId, skills, store, mcp],
   );
 
   // Queued messages run as soon as the agent frees up.
