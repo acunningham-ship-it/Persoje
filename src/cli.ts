@@ -165,9 +165,45 @@ async function runHeadless(agent: Agent, maxRounds = 25): Promise<void> {
   log(`reached ${maxRounds} continuation rounds — pausing`);
 }
 
+/**
+ * Print/headless runner (`persoje -p`). Streams tool activity to STDERR so it
+ * stays out of the way, and writes ONLY the final result to STDOUT — plain text,
+ * or a JSON object with --json. Built for piping and scripts.
+ */
+async function runPrint(agent: Agent, input: string, json: boolean): Promise<void> {
+  let finalText = "";
+  const tools: string[] = [];
+  let errored = false;
+  for await (const ev of agent.run(input)) {
+    if (ev.type === "text-end") finalText = ev.text;
+    else if (ev.type === "tool-start") {
+      tools.push(ev.name);
+      process.stderr.write(chalk.dim(`  ⚙ ${ev.name}\n`));
+    } else if (ev.type === "error") {
+      errored = true;
+      process.stderr.write(chalk.red(`error: ${ev.message}\n`));
+    }
+  }
+  const t = agent.accounting.totals();
+  if (json) {
+    process.stdout.write(
+      JSON.stringify({ text: finalText, tools, tokens: t.inputTokens + t.outputTokens, cost: t.cost }) + "\n",
+    );
+  } else {
+    process.stdout.write(finalText + "\n");
+  }
+  if (errored && !finalText) process.exit(1);
+}
+
 function printHelp(): void {
   console.log(`
 ${chalk.bold("Persoje")} v${VERSION} — token-efficient agentic CLI
+
+  persoje                 start the interactive TUI
+  persoje "do the thing"  one-shot: run once, stream to the terminal
+  persoje -p "..."        print mode: run once, only the final result on stdout
+  cat task.md | persoje -p   read the prompt from stdin
+  persoje -p "..." --json    final result as JSON {text,tools,tokens,cost}
 
   /model [id]   show or switch model
   /cost         session token + cost totals
@@ -176,6 +212,8 @@ ${chalk.bold("Persoje")} v${VERSION} — token-efficient agentic CLI
   /exit         quit (or ctrl+d)
 
   --no-update   skip auto-update check
+  -p, --print   headless print mode (no TUI, no auto-update, no wizard)
+  --json        with -p: emit a JSON result object instead of plain text
   ctrl+c during a turn cancels it.
 `);
 }
@@ -183,10 +221,15 @@ ${chalk.bold("Persoje")} v${VERSION} — token-efficient agentic CLI
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
+  // Print/headless mode (`persoje -p "prompt"` or piped stdin): run once, print
+  // only the final result to stdout for scripting. Implies no-update + no wizard.
+  const printMode = args.includes("-p") || args.includes("--print");
+  const jsonOut = args.includes("--json");
+
   // Pre-launch auto-update: fetch, pull, rebuild, exec new binary if needed.
   // Runs before anything else so the user always runs the latest version.
-  // Skipped with --no-update or PERSOJE_NO_UPDATE=1 env var.
-  if (!args.includes("--no-update") && !process.env.PERSOJE_NO_UPDATE) {
+  // Skipped with --no-update, PERSOJE_NO_UPDATE=1, or print mode (deterministic scripts).
+  if (!args.includes("--no-update") && !process.env.PERSOJE_NO_UPDATE && !printMode) {
     const { preLaunchUpdate } = await import("./core/updater.ts");
     await preLaunchUpdate(process.argv, (msg) => {
       process.stderr.write(`  ↻ ${msg}\n`);
@@ -202,8 +245,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  // First run: no config and no key → interactive setup.
-  if (!(await Bun.file(GLOBAL_CONFIG_PATH).exists()) && !process.env.OPENROUTER_API_KEY && process.stdout.isTTY) {
+  // First run: no config and no key → interactive setup (never in print mode).
+  if (!printMode && !(await Bun.file(GLOBAL_CONFIG_PATH).exists()) && !process.env.OPENROUTER_API_KEY && process.stdout.isTTY) {
     const { runSetupWizard } = await import("./setup/wizard.ts");
     if (!(await runSetupWizard())) return;
   }
@@ -251,7 +294,7 @@ async function main(): Promise<void> {
   const skills = new SkillLibrary(join(GLOBAL_CONFIG_DIR, "skills"));
   // Auto-prune unused skills on startup
   const pruned = skills.prune();
-  if (pruned.length > 0) console.log(`Pruned ${pruned.length} unused skill(s): ${pruned.join(", ")}`);
+  if (pruned.length > 0 && !printMode) console.log(`Pruned ${pruned.length} unused skill(s): ${pruned.join(", ")}`);
 
   // Personality: loaded from disk, controls agent behavior
   const personality = loadPersonality();
@@ -303,6 +346,20 @@ async function main(): Promise<void> {
   // One-shot mode: persoje "do the thing" (no persistence, auto-approve)
   const flagsWithValue = new Set(["--model", "--resume"]);
   const positional = args.filter((a, i) => !a.startsWith("-") && !flagsWithValue.has(args[i - 1] ?? ""));
+
+  // Print/headless mode: prompt from args or piped stdin, only the final result
+  // on stdout (clean for `persoje -p "..." | pbcopy` or `… | persoje -p`).
+  if (printMode) {
+    let prompt = positional.join(" ").trim();
+    if (!prompt && !process.stdin.isTTY) prompt = (await Bun.stdin.text()).trim();
+    if (!prompt) {
+      process.stderr.write('usage: persoje -p "prompt"  (or pipe the prompt on stdin) [--json]\n');
+      process.exit(1);
+    }
+    await runPrint(agent, prompt, jsonOut);
+    return;
+  }
+
   if (positional.length > 0) {
     await runTurn(agent, positional.join(" "));
     return;

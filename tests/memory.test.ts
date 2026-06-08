@@ -15,10 +15,16 @@ function createTempDir(): string {
 }
 
 /** Fake client for testing. */
-function fakeClient(response: string) {
+// Accepts one response (reused for every call) or a list returned in call
+// order (clamped to the last) — runDream makes a 2nd "judge" call after the
+// extraction call, so dream tests supply [extraction, judgeVerdict].
+function fakeClient(response: string | string[]) {
+  let call = 0;
   return {
     stream: async function* (_req: ChatRequest): AsyncGenerator<StreamEvent> {
-      yield { type: "text", delta: response };
+      const arr = Array.isArray(response) ? response : [response];
+      const delta = arr[Math.min(call++, arr.length - 1)]!;
+      yield { type: "text", delta };
       yield {
         type: "usage",
         usage: {
@@ -371,7 +377,8 @@ describe("runDream", () => {
       });
 
       const result = await runDream({
-        client: fakeClient(dreamResponse),
+        // [extraction, judge-verdict] — judge keeps candidate #1.
+        client: fakeClient([dreamResponse, '{"keep":[1]}']),
         model: "test/free",
         store,
         facts,
