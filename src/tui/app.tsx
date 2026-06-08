@@ -193,6 +193,28 @@ export function App({
     }
   }, [sessionTitle]);
 
+  // Clean repaint on terminal resize. Ink under-clears full-width borders when
+  // the terminal shrinks (the old, wider frame wraps and throws off its line
+  // count), leaving stacked ghost boxes. Debounced clear-screen + remount fixes
+  // it — the debounce means a drag-resize only repaints once it settles.
+  const [resizeNonce, setResizeNonce] = useState(0);
+  useEffect(() => {
+    if (!process.stdout.isTTY) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onResize = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        process.stdout.write("\x1b[2J\x1b[3J\x1b[H"); // clear screen + scrollback
+        setResizeNonce((n) => n + 1);
+      }, 120);
+    };
+    process.stdout.on("resize", onResize);
+    return () => {
+      if (timer) clearTimeout(timer);
+      process.stdout.off("resize", onResize);
+    };
+  }, []);
+
   const push = useCallback((item: DistOmit<DisplayItem, "id">) => {
     setItems((prev) => [...prev, { ...item, id: nextId++ } as DisplayItem]);
   }, []);
@@ -914,7 +936,9 @@ export function App({
   });
 
   return (
-    <Box flexDirection="column">
+    // key on resizeNonce → remount + repaint the whole tree (incl. Static) at
+    // the new width after a resize, so no ghost frames are left behind.
+    <Box flexDirection="column" key={resizeNonce}>
       <Static items={[{ id: 0 } as { id: number }, ...items] as Array<{ id: number } | DisplayItem>}>
         {(item) => {
           if (!("kind" in item)) {
