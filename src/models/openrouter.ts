@@ -68,6 +68,20 @@ export class OpenRouterError extends Error {
 
 const DEFAULT_MAX_RETRIES = 5;
 
+/**
+ * Is a mid-stream SSE error worth retrying? OpenRouter returns these as an error
+ * chunk after a 200, so they bypass the HTTP-status retry. Stealth/free providers
+ * (e.g. owl-alpha) throw "Provider returned error" transiently — retrying the
+ * request usually succeeds. Be conservative: retry transient upstream failures,
+ * not genuine client errors (bad request, context length, content filter).
+ */
+export function isTransientStreamError(message: string, code: number): boolean {
+  if (code === 429 || (code >= 500 && code <= 599)) return true;
+  return /provider returned error|overloaded|temporarily|unavailable|timeout|timed out|rate.?limit|capacity|try again|503|502|520/i.test(
+    message,
+  );
+}
+
 export class OpenRouterClient {
   constructor(
     private apiKey: string,
@@ -162,72 +176,104 @@ export class OpenRouterClient {
     if (req.provider) body.provider = req.provider;
 
     const maxRetries = req.maxRetries ?? DEFAULT_MAX_RETRIES;
-    const response = await this.fetchWithRetry(body, req.signal, maxRetries, (attempt, delayMs, reason) => {
-      // Emit retry event into the stream
-      // We can't yield from here, so we store it for the caller
-      this._lastRetryEvent = { type: "retry", attempt, maxRetries, delayMs, reason };
-    });
-    if (!response.body) throw new OpenRouterError("Empty response body", 0, false);
 
-    // Accumulate tool-call deltas by index (OpenAI streaming convention).
-    const toolCalls = new Map<number, { id: string; name: string; argsJson: string }>();
-    let sawText = false;
+    // The retry loop wraps the full request + SSE consumption, not just the fetch.
+    // A mid-stream "Provider returned error" arrives as an error chunk after a 200,
+    // so fetchWithRetry never sees it — without this loop, one flaky provider reply
+    // ends the whole turn. We only retry while nothing has been emitted to the caller
+    // yet; once text/usage is out, a re-request would duplicate output, so we propagate.
+    let yieldedAny = false;
+    for (let streamAttempt = 0; ; streamAttempt++) {
+      const response = await this.fetchWithRetry(body, req.signal, maxRetries, (attempt, delayMs, reason) => {
+        this._lastRetryEvent = { type: "retry", attempt, maxRetries, delayMs, reason };
+      });
+      if (!response.body) throw new OpenRouterError("Empty response body", 0, false);
 
-    for await (const data of sseLines(response.body, req.signal)) {
-      if (data === "[DONE]") break;
-      let chunk: any;
+      // Accumulate tool-call deltas by index (OpenAI streaming convention).
+      const toolCalls = new Map<number, { id: string; name: string; argsJson: string }>();
+      let sawText = false;
+
       try {
-        chunk = JSON.parse(data);
-      } catch {
-        continue; // OpenRouter sends ": OPENROUTER PROCESSING" comments; skip anything non-JSON
-      }
-      if (chunk.error) {
-        throw new OpenRouterError(chunk.error.message ?? "stream error", chunk.error.code ?? 0, false);
-      }
+        for await (const data of sseLines(response.body, req.signal)) {
+          if (data === "[DONE]") break;
+          let chunk: any;
+          try {
+            chunk = JSON.parse(data);
+          } catch {
+            continue; // OpenRouter sends ": OPENROUTER PROCESSING" comments; skip anything non-JSON
+          }
+          if (chunk.error) {
+            const code = chunk.error.code ?? 0;
+            const msg = chunk.error.message ?? "stream error";
+            throw new OpenRouterError(msg, code, isTransientStreamError(msg, code));
+          }
 
-      const delta = chunk.choices?.[0]?.delta;
-      if (delta?.content) {
-        sawText = true;
-        yield { type: "text", delta: delta.content as string };
-      }
-      if (delta?.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index ?? 0;
-          const existing = toolCalls.get(idx) ?? { id: "", name: "", argsJson: "" };
-          if (tc.id) existing.id = tc.id;
-          if (tc.function?.name) existing.name += tc.function.name;
-          if (tc.function?.arguments) existing.argsJson += tc.function.arguments;
-          toolCalls.set(idx, existing);
+          const delta = chunk.choices?.[0]?.delta;
+          if (delta?.content) {
+            sawText = true;
+            yieldedAny = true;
+            yield { type: "text", delta: delta.content as string };
+          }
+          if (delta?.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const idx = tc.index ?? 0;
+              const existing = toolCalls.get(idx) ?? { id: "", name: "", argsJson: "" };
+              if (tc.id) existing.id = tc.id;
+              if (tc.function?.name) existing.name += tc.function.name;
+              if (tc.function?.arguments) existing.argsJson += tc.function.arguments;
+              toolCalls.set(idx, existing);
+            }
+          }
+
+          if (chunk.usage) {
+            yieldedAny = true;
+            yield {
+              type: "usage",
+              usage: {
+                model: chunk.model ?? req.model,
+                inputTokens: chunk.usage.prompt_tokens ?? 0,
+                outputTokens: chunk.usage.completion_tokens ?? 0,
+                cachedTokens: chunk.usage.prompt_tokens_details?.cached_tokens ?? 0,
+                cost: chunk.usage.cost ?? 0,
+                durationMs: Date.now() - started,
+              },
+            };
+          }
         }
-      }
-
-      if (chunk.usage) {
-        yield {
-          type: "usage",
-          usage: {
-            model: chunk.model ?? req.model,
-            inputTokens: chunk.usage.prompt_tokens ?? 0,
-            outputTokens: chunk.usage.completion_tokens ?? 0,
-            cachedTokens: chunk.usage.prompt_tokens_details?.cached_tokens ?? 0,
-            cost: chunk.usage.cost ?? 0,
-            durationMs: Date.now() - started,
-          },
+      } catch (err) {
+        const e = err as OpenRouterError;
+        const canRetry =
+          e instanceof OpenRouterError && e.retryable && !yieldedAny && streamAttempt < maxRetries;
+        if (!canRetry) throw err;
+        if (req.signal?.aborted) throw new DOMException("aborted", "AbortError");
+        const delayMs = 1500 * 2 ** streamAttempt + 2000;
+        const retryEv = {
+          type: "retry" as const,
+          attempt: streamAttempt + 1,
+          maxRetries,
+          delayMs,
+          reason: "provider error",
         };
+        this._lastRetryEvent = retryEv;
+        yield retryEv;
+        await Bun.sleep(delayMs);
+        continue; // re-request from scratch
       }
-    }
 
-    if (toolCalls.size > 0) {
-      const calls: ToolCallRequest[] = [...toolCalls.entries()]
-        .sort(([a], [b]) => a - b)
-        .map(([i, c]) => ({
-          id: c.id || `call_${started}_${i}`,
-          name: c.name,
-          argsJson: c.argsJson || "{}",
-        }));
-      yield { type: "tool-calls", calls };
-    } else if (!sawText) {
-      // Some weak/free models return an entirely empty stream — surface it rather than hang.
-      yield { type: "text", delta: "" };
+      if (toolCalls.size > 0) {
+        const calls: ToolCallRequest[] = [...toolCalls.entries()]
+          .sort(([a], [b]) => a - b)
+          .map(([i, c]) => ({
+            id: c.id || `call_${started}_${i}`,
+            name: c.name,
+            argsJson: c.argsJson || "{}",
+          }));
+        yield { type: "tool-calls", calls };
+      } else if (!sawText) {
+        // Some weak/free models return an entirely empty stream — surface it rather than hang.
+        yield { type: "text", delta: "" };
+      }
+      return; // clean completion — leave the retry loop
     }
   }
 
