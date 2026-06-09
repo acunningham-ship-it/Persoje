@@ -21,9 +21,9 @@
  * Defaults to your configured primary model; pass a free model id to run at $0
  * (judge tasks are skipped unless --judge is given).
  */
-import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { Agent } from "../src/core/agent.ts";
 import { loadConfig } from "../src/config/config.ts";
 import { OpenRouterClient } from "../src/models/openrouter.ts";
@@ -91,6 +91,62 @@ const TASKS: EvalTask[] = [
       return null;
     },
   },
+  // --- adversarial: tasks built to make a weak model thrash, so the guardrails
+  // (loop detection, path grounding, claim verify) have something to catch. ---
+  {
+    name: "wrong-path-recovery",
+    kind: "assert",
+    files: {
+      "lib/text_helpers.py":
+        "def slugify(s):\n    # bug: forgets to lowercase\n    return s.strip().replace(' ', '-')\n\n" +
+        'if __name__ == "__main__":\n    assert slugify("Hello World") == "hello-world", slugify("Hello World")\n    print("ok")\n',
+    },
+    // NOTE the prompt names lib/text_helper.py — singular, wrong. The real file is
+    // text_helpers.py. The agent has to ground itself (ls/glob) instead of trusting
+    // the path, then fix the actual bug.
+    prompt:
+      "There's a failing assertion in lib/text_helper.py — the slugify function. Locate the file, fix the bug, and make running it with python3 print ok.",
+    verify: "python3 lib/text_helpers.py",
+    maxIterations: 16,
+  },
+  {
+    name: "mutable-default-trap",
+    kind: "assert",
+    files: {
+      "accumulate.py":
+        "def add_item(item, bucket=[]):\n    bucket.append(item)\n    return bucket\n\n" +
+        'if __name__ == "__main__":\n    assert add_item(1) == [1], add_item(1)\n' +
+        "    assert add_item(2) == [2], add_item(2)\n    print('ok')\n",
+    },
+    prompt:
+      "python3 accumulate.py fails on the second assertion. Diagnose the real root cause and fix add_item so both assertions pass. Do not change the assertions. Run it to confirm it prints ok.",
+    verify: "python3 accumulate.py",
+    // guard against the weak-model cheat of "fixing" the test instead of the code.
+    check: (dir) => {
+      const c = read(dir, "accumulate.py");
+      if (!c.includes("add_item(1) == [1]") || !c.includes("add_item(2) == [2]"))
+        return "assertions were altered — fixed the test, not the bug";
+      return null;
+    },
+    maxIterations: 16,
+  },
+  {
+    name: "cross-file-refactor",
+    kind: "assert",
+    files: {
+      "geometry.js": "function area(w, h) { return w * h; }\nmodule.exports = { area };\n",
+      "main.js": "const { area } = require('./geometry');\nconsole.log(area(3, 4));\n",
+      "report.js":
+        "const { area } = require('./geometry');\nfunction summary() { return 'area=' + area(2, 5); }\nmodule.exports = { summary };\n",
+    },
+    prompt:
+      "Refactor area(w, h) into area({ width, height }) (a single object argument). Update geometry.js and every caller — main.js and report.js — to match. main.js should still print 12.",
+    // end-to-end: main prints 12 AND report's summary() returns area=10 through the
+    // new signature. Catches a half-done refactor that updates one caller but not both.
+    verify:
+      "node main.js | grep -qx 12 && node -e \"const {summary} = require('./report'); process.exit(summary() === 'area=10' ? 0 : 1)\"",
+    maxIterations: 16,
+  },
   {
     name: "explain-code",
     kind: "judge",
@@ -129,6 +185,22 @@ interface Outcome {
   inputTokens: number;
   outputTokens: number;
   cost: number;
+  /** how many times each guardrail kind fired this task (loop/rescue/fuzzy/syntax). */
+  guardrails: Record<string, number>;
+  /** router escalations + transport retries — the harness fighting a weak model. */
+  escalations: number;
+  retries: number;
+  iterations: number;
+  endReason: string;
+}
+
+/** flatten the per-kind guardrail tally into a compact cell like "loop×2 syntax×1". */
+function fmtGuardrails(o: Outcome): string {
+  const parts: string[] = [];
+  for (const [k, n] of Object.entries(o.guardrails)) if (n) parts.push(`${k}×${n}`);
+  if (o.escalations) parts.push(`esc×${o.escalations}`);
+  if (o.retries) parts.push(`retry×${o.retries}`);
+  return parts.length ? parts.join(" ") : "—";
 }
 
 async function judge(
@@ -170,10 +242,14 @@ async function runTask(
   useJudge: boolean,
 ): Promise<Outcome> {
   if (task.kind === "judge" && !useJudge) {
-    return { pass: null, reason: "judge task skipped (pass --judge)", calls: 0, inputTokens: 0, outputTokens: 0, cost: 0 };
+    return { pass: null, reason: "judge task skipped (pass --judge)", calls: 0, inputTokens: 0, outputTokens: 0, cost: 0, guardrails: {}, escalations: 0, retries: 0, iterations: 0, endReason: "skipped" };
   }
   const dir = mkdtempSync(join(tmpdir(), `eval-${task.name}-`));
-  for (const [p, content] of Object.entries(task.files ?? {})) writeFileSync(join(dir, p), content);
+  for (const [p, content] of Object.entries(task.files ?? {})) {
+    const full = join(dir, p);
+    mkdirSync(dirname(full), { recursive: true }); // tasks may use nested paths (e.g. lib/foo.py)
+    writeFileSync(full, content);
+  }
 
   const cfg = structuredClone(config);
   cfg.memory.enabled = false;
@@ -182,14 +258,23 @@ async function runTask(
 
   const agent = new Agent({ client, tools: buildRegistry(), config: cfg, cwd: dir });
   let finalText = "";
+  const guardrails: Record<string, number> = {};
+  let escalations = 0;
+  let retries = 0;
+  let iterations = 0;
+  let endReason = "?";
   try {
     for await (const ev of agent.run(task.prompt)) {
       if (ev.type === "text-end") finalText = ev.text;
+      else if (ev.type === "guardrail") guardrails[ev.kind] = (guardrails[ev.kind] ?? 0) + 1;
+      else if (ev.type === "router") escalations++;
+      else if (ev.type === "retry") retries++;
+      else if (ev.type === "turn-end") { iterations = ev.iterations; endReason = ev.reason; }
     }
   } catch (e) {
     rmSync(dir, { recursive: true, force: true });
     const t = agent.accounting.totals();
-    return { pass: false, reason: `agent error: ${(e as Error).message}`, calls: t.calls, inputTokens: t.inputTokens, outputTokens: t.outputTokens, cost: t.cost };
+    return { pass: false, reason: `agent error: ${(e as Error).message}`, calls: t.calls, inputTokens: t.inputTokens, outputTokens: t.outputTokens, cost: t.cost, guardrails, escalations, retries, iterations, endReason: "error" };
   }
   const t = agent.accounting.totals();
 
@@ -217,7 +302,7 @@ async function runTask(
   }
 
   rmSync(dir, { recursive: true, force: true });
-  return { pass, reason, calls: t.calls, inputTokens: t.inputTokens, outputTokens: t.outputTokens, cost: t.cost };
+  return { pass, reason, calls: t.calls, inputTokens: t.inputTokens, outputTokens: t.outputTokens, cost: t.cost, guardrails, escalations, retries, iterations, endReason };
 }
 
 async function main() {
@@ -243,17 +328,21 @@ async function main() {
   const client = new OpenRouterClient(apiKey, base.openrouter.baseUrl);
 
   console.log(`# Persoje eval — task completion\n\nmodel: \`${model}\`  ·  judge: ${useJudge ? `\`${base.model.judge || model}\`` : "off"}\n`);
-  console.log("| task | kind | result | turns | tok/turn | cost | note |");
-  console.log("|---|---|:--:|--:|--:|--:|---|");
+  console.log("| task | kind | result | turns | tok/turn | guardrails | cost | note |");
+  console.log("|---|---|:--:|--:|--:|---|--:|---|");
 
   let passed = 0;
   let scored = 0;
+  const fired: Record<string, number> = {};
   for (const task of tasks) {
     const o = await runTask(task, base, client, useJudge);
     const mark = o.pass === null ? "—" : o.pass ? "✅" : "❌";
     const perTurn = o.calls ? Math.round(o.inputTokens / o.calls).toLocaleString() : "—";
     const cost = o.cost ? `$${o.cost.toFixed(4)}` : "$0";
-    console.log(`| ${task.name} | ${task.kind} | ${mark} | ${o.calls || "—"} | ${perTurn} | ${cost} | ${o.reason} |`);
+    console.log(`| ${task.name} | ${task.kind} | ${mark} | ${o.calls || "—"} | ${perTurn} | ${fmtGuardrails(o)} | ${cost} | ${o.reason} |`);
+    for (const [k, n] of Object.entries(o.guardrails)) fired[k] = (fired[k] ?? 0) + n;
+    if (o.escalations) fired.esc = (fired.esc ?? 0) + o.escalations;
+    if (o.retries) fired.retry = (fired.retry ?? 0) + o.retries;
     if (o.pass !== null) {
       scored++;
       if (o.pass) passed++;
@@ -261,6 +350,8 @@ async function main() {
   }
 
   console.log(`\n**${passed}/${scored} tasks passed.**`);
+  const firedSummary = Object.entries(fired).filter(([, n]) => n).map(([k, n]) => `${k}×${n}`).join(", ");
+  console.log(`\nGuardrail activations: ${firedSummary || "none fired"}.`);
   if (passed < scored) process.exitCode = 1;
 }
 
