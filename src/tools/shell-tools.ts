@@ -2,6 +2,18 @@ import { z } from "zod";
 import { resolve } from "node:path";
 import { ToolError, type Tool } from "./types.ts";
 
+/**
+ * Does this command launch a long-running service that won't exit on its own?
+ * Weak models reliably start servers in the foreground without background:true,
+ * which then blocks the turn until timeout. We look at the last &&/;-separated
+ * segment (the actual run step) so `pip install gunicorn && gunicorn app` still
+ * matches the gunicorn, not the install.
+ */
+export function looksLikeServer(cmd: string): boolean {
+  const seg = cmd.split(/&&|;|\|\|/).pop()?.trim() ?? "";
+  return /^(sudo\s+)?(env\s+\S+=\S+\s+)*(\.\/\S*server\S*|python[0-9.]*\s+(-m\s+http\.server|\S*server\S*\.py|manage\.py\s+runserver|-m\s+flask\s+run)|flask\s+run|(uvicorn|gunicorn|hypercorn|daphne)\s|node\s+\S*(server|app)\S*|(npm|yarn|pnpm)\s+(run\s+)?(start|serve|dev)\b|php\s+-S|rails\s+s(erver)?\b|jupyter\s+(notebook|lab|server)|http-server|live-server|serve\s)/.test(seg);
+}
+
 export const bashTool: Tool = {
   name: "bash",
   description:
@@ -17,9 +29,13 @@ export const bashTool: Tool = {
   }),
   maxResultTokens: 2000,
   async execute({ command, background }, ctx) {
+    // Auto-background obvious servers even when the model forgot the flag — a
+    // foreground `flask run` / `node server.js` would otherwise block the turn,
+    // and killing it on timeout takes the server down before anything can hit it.
+    const detach = background || looksLikeServer(command);
     // Detached path: the process outlives this turn (and the agent), so a server
     // started here is still up when something later connects to it. Returns at once.
-    if (background) {
+    if (detach) {
       const stamp = `${Date.now()}-${Math.floor(performance.now())}`;
       const script = `/tmp/persoje-bg-${stamp}.sh`;
       const log = `/tmp/persoje-bg-${stamp}.log`;
