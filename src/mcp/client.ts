@@ -19,7 +19,7 @@
 import { z } from "zod";
 import { spawn, type Subprocess } from "bun";
 import { join } from "node:path";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, renameSync, fsyncSync, openSync } from "node:fs";
 import { mkdirSync } from "node:fs";
 import type { Tool, ToolContext } from "../tools/types.ts";
 
@@ -77,14 +77,38 @@ export function loadMcpConfig(): McpConfig {
   if (!existsSync(MCP_CONFIG_PATH)) return { servers: {} };
   try {
     return JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8")) as McpConfig;
-  } catch {
+  } catch (error) {
+    // Non-destructive: back up the corrupted file instead of silently discarding it.
+    const backupPath = `${MCP_CONFIG_PATH}.corrupt.bak`;
+    try {
+      renameSync(MCP_CONFIG_PATH, backupPath);
+      console.error(`[MCP] Corrupted mcp.json backed up to ${backupPath}. Falling back to empty config.`);
+    } catch {
+      console.error(`[MCP] Failed to parse mcp.json and could not back it up. Falling back to empty config.`);
+    }
     return { servers: {} };
   }
 }
 
 export function saveMcpConfig(config: McpConfig): void {
   mkdirSync(join(process.env.HOME ?? "", ".config", "persoje"), { recursive: true });
-  writeFileSync(MCP_CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+
+  // Atomic write: write to temp file, fsync, then rename atomically.
+  // This prevents corruption if the process crashes mid-write or concurrent
+  // writes truncate the file. POSIX rename() is atomic.
+  const tempPath = `${MCP_CONFIG_PATH}.tmp`;
+  try {
+    writeFileSync(tempPath, JSON.stringify(config, null, 2), "utf-8");
+    // Ensure data is written to disk before rename.
+    const fd = openSync(tempPath, "r");
+    fsyncSync(fd);
+    fd; // suppress unused warning
+    // Atomic rename: moves temp into place, clobbering any partial/corrupted file.
+    renameSync(tempPath, MCP_CONFIG_PATH);
+  } catch (error) {
+    console.error(`[MCP] Failed to save config atomically: ${error}`);
+    throw error;
+  }
 }
 
 // ── MCP Server Connection (stdio transport) ──
