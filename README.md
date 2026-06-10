@@ -2,7 +2,7 @@
 
 A token-efficient agentic coding CLI for [OpenRouter](https://openrouter.ai). Point it at *any* model — a free stealth preview, a small open model, or a frontier one — and a lean harness keeps it honest and keeps your context small.
 
-The premise: **a good harness makes a cheap model punch above its weight.** Heavier agents replay the whole conversation plus untruncated tool output and let context balloon before compacting. Persoje keeps a lean working set, so the same model runs at a fraction of the tokens per turn.
+The premise: **a good harness makes a cheap model punch above its weight.** Heavier agents replay the whole conversation plus untruncated tool output and let context balloon before compacting. Persoje keeps a lean working set, so on long debugging sessions with large tool output, the same model runs at a fraction of the tokens per turn. On quick tasks it's neutral — the discipline earns its keep on real work.
 
 ![Context per turn: full-replay agent 17k–288k (median ~143k) vs Persoje 1k–25k (median ~12k)](docs/token-comparison.svg)
 
@@ -76,6 +76,16 @@ Token discipline is enforced *before* anything reaches the model:
 | **Web research** | `web_search` (keyless, via DuckDuckGo) and `web_fetch` let the agent look up docs/APIs instead of guessing — HTML is stripped to lean markdown *before* it reaches the model, and the result is token-capped like any tool. |
 | **Sub-agents** | The `task` tool delegates to an isolated-context worker; only a capped summary returns to the parent. |
 | **Live accounting** | Real per-call cost from OpenRouter, shown in the status gauge against the model's true context window. |
+
+## Performance Profile
+
+Token efficiency depends on your task:
+
+- **Short tasks (2–4 turns, small tool output):** The lean harness is roughly neutral vs. naive replay (within ±5%). On a bug fix or quick feature, both approaches use similar token budgets. The overhead of discipline doesn't yet pay off.
+- **Large-output tasks:** ~2.4× savings when tool output exceeds the token budget (e.g., reading a 1600+ line file). Persoje caps the output; the naive approach replays it whole. You see the difference immediately.
+- **Long sessions (8+ turns):** The gap widens as naive context balloons. Each turn, the naive agent carries the full history + all untruncated tool output. Persoje keeps a bounded working set and compacts old turns. Over 10+ turns, this compounds to the real-world gap.
+
+**Real-world logs show ~12× difference** because active coding sessions combine *large tool output + multi-turn accumulation*. The controlled benchmark in [`bench/`](bench/) tests short tasks; for your own workload, run `bun run bench/run.ts --model openrouter/owl-alpha` and measure.
 
 ## Why it survives weak models
 
