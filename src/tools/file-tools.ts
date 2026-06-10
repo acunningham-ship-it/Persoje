@@ -3,6 +3,7 @@ import { resolve, dirname } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { ToolError, type Tool, type ToolContext } from "./types.ts";
 import { applyEdit, nearMatchHint } from "./edit-match.ts";
+import { ReadCache } from "./read-cache.ts";
 
 /**
  * Apply one edit to in-memory content, translating a structured failure into a
@@ -56,16 +57,64 @@ export const readTool: Tool = {
   }),
   maxResultTokens: 4000,
   async execute({ path, offset, limit }, ctx) {
-    const file = Bun.file(resolveInCwd(path, ctx));
+    const absPath = resolveInCwd(path, ctx);
+    const file = Bun.file(absPath);
     if (!(await file.exists())) throw new ToolError(`File not found: ${path}`);
-    const lines = (await file.text()).split("\n");
-    const start = Math.max(0, (offset ?? 1) - 1);
-    const end = limit ? start + limit : lines.length;
-    const slice = lines.slice(start, end);
-    const numbered = slice.map((l, i) => `${start + i + 1}\t${l}`).join("\n");
-    const suffix =
-      end < lines.length ? `\n[file has ${lines.length} lines; showing ${start + 1}-${Math.min(end, lines.length)}]` : "";
-    return numbered + suffix;
+
+    // Partial reads always bypass cache (user is exploring large files).
+    if (offset !== undefined || limit !== undefined) {
+      const content = await file.text();
+      const lines = content.split("\n");
+      const start = Math.max(0, (offset ?? 1) - 1);
+      const end = limit ? start + limit : lines.length;
+      const slice = lines.slice(start, end);
+      const numbered = slice.map((l, i) => `${start + i + 1}\t${l}`).join("\n");
+      const suffix =
+        end < lines.length ? `\n[file has ${lines.length} lines; showing ${start + 1}-${Math.min(end, lines.length)}]` : "";
+      return numbered + suffix;
+    }
+
+    // Full read: use cache if available.
+    const content = await file.text();
+    const mtime = (await file.stat()).mtime?.getTime() ?? 0;
+    const cache = ctx.readCache;
+
+    if (cache) {
+      const status = cache.checkStatus(absPath, mtime);
+
+      if (status === "unchanged") {
+        // File hasn't changed since last read this session — save tokens.
+        const lines = content.split("\n");
+        const estimatedTokens = Math.ceil((lines.length * 4 * 170) / 100); // ~4 chars/token, +70% for line numbers
+        return `[already read this session, unchanged — ${estimatedTokens} tokens saved by not re-reading]`;
+      }
+
+      if (status === "changed") {
+        const cachedContent = cache.getCachedContent(absPath);
+        if (cachedContent) {
+          const diff = cache.getDiff(cachedContent, content);
+          if (diff) {
+            // Diff is small enough — show just the changes.
+            const estimatedTokens = Math.ceil((diff.length * 170) / 100);
+            const response = `[${path} changed since last read — showing diff (${estimatedTokens} tokens vs full re-read)]\n\n${diff}`;
+            cache.record(absPath, mtime, content);
+            return response;
+          }
+        }
+        // Diff too large or failed — fall through to full read.
+      }
+
+      // New file or diff failed — show full content and cache it.
+      const lines = content.split("\n");
+      const numbered = lines.map((l, i) => `${i + 1}\t${l}`).join("\n");
+      cache.record(absPath, mtime, content);
+      return numbered;
+    }
+
+    // No cache available — return full content (normal path for tests/legacy code).
+    const lines = content.split("\n");
+    const numbered = lines.map((l, i) => `${i + 1}\t${l}`).join("\n");
+    return numbered;
   },
 };
 

@@ -7,6 +7,7 @@ import { ContextManager } from "../context/manager.ts";
 import { OpenRouterClient, type ToolCallRequest } from "../models/openrouter.ts";
 import { getCapabilities } from "../models/capabilities.ts";
 import { ToolError, type ToolContext, type ToolRegistry } from "../tools/types.ts";
+import { ReadCache } from "../tools/read-cache.ts";
 import type { PersojeConfig } from "../config/config.ts";
 import { closestToolName } from "../guardrails/fuzzy.ts";
 import { rescueToolCalls } from "../guardrails/rescue.ts";
@@ -64,6 +65,7 @@ const MUTATING_TOOLS = new Set(["bash", "write", "edit"]);
 export class Agent {
   readonly context: ContextManager;
   readonly accounting = new Accounting();
+  readonly readCache = new ReadCache();
   private turn = 0;
 
   constructor(private deps: AgentDeps) {
@@ -72,6 +74,11 @@ export class Agent {
       deps.config.context.compactionThreshold,
       deps.config.context.keepFullTurns,
     );
+    // Invalidate read cache on compaction: earlier reads may have been elided.
+    // Safe-guarding against returning "[already read]" marker for content the agent no longer has.
+    this.context.onCompact = () => {
+      this.readCache.clear();
+    };
   }
 
   /** Compact the conversation via the compactor model (free-model grunt work). */
@@ -506,6 +513,7 @@ export class Agent {
       signal,
       bashTimeoutMs: config.loop.bashTimeoutMs,
       transcriptPath: this.deps.transcriptPath,
+      readCache: this.readCache,
       setGoal: (g: string) => {
         this.context.goal = g;
         this.deps.onGoalSet?.(g);

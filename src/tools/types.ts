@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ToolSchema } from "../models/openrouter.ts";
+import type { ReadCache } from "./read-cache.ts";
 
 /** A single step in the working plan the model maintains via update_todos. */
 export interface TodoItem {
@@ -19,6 +20,8 @@ export interface ToolContext {
   transcriptPath?: string;
   /** Live progress (e.g. latest bash stdout line) — surfaced in the spinner. */
   onProgress?: (line: string) => void;
+  /** Per-session read deduplication cache. */
+  readCache?: ReadCache;
 }
 
 export interface Tool<A = any> {
