@@ -16,6 +16,9 @@ import type { Personality } from "./personality.ts";
 import { personalityPrompt, DEFAULT_PERSONALITY } from "./personality.ts";
 import type { TodoItem } from "../tools/types.ts";
 import { renderTodos } from "../tools/todo-tools.ts";
+import { existsSync } from "fs";
+import { readFileSync } from "fs";
+import { resolve, dirname } from "path";
 
 export type EffortLevel = "low" | "mid" | "high" | "max";
 
@@ -25,6 +28,29 @@ const EFFORT_PROMPTS: Record<EffortLevel, string> = {
   high: `Effort: HIGH. Be thorough. Explore broadly before acting. Verify every change. Explain your reasoning. Consider alternatives.`,
   max: `Effort: MAX. Be exhaustive. Full analysis before any action. Verify every step. Consider edge cases and failure modes. Never skip verification. Think step-by-step. Explore all relevant files before deciding.`,
 };
+
+function findProjectConventions(cwd: string): string {
+  let current = cwd;
+
+  while (true) {
+    for (const filename of ["AGENTS.md", "CLAUDE.md"]) {
+      const path = resolve(current, filename);
+      if (existsSync(path)) {
+        try {
+          return readFileSync(path, "utf-8");
+        } catch {
+          return "";
+        }
+      }
+    }
+
+    const parent = dirname(current);
+    if (parent === current) break; // reached root
+    current = parent;
+  }
+
+  return "";
+}
 
 export function buildSystemPrompt(
   cwd: string,
@@ -56,6 +82,12 @@ export function buildSystemPrompt(
     ? `\n\nWORKING PLAN (update_todos to revise; mark steps done as you go):\n${renderTodos(todos)}`
     : "";
 
+  // Auto-load project conventions (AGENTS.md or CLAUDE.md) if found.
+  const conventions = findProjectConventions(cwd);
+  const projectConventionsSection = conventions
+    ? `\n\nPROJECT CONVENTIONS (auto-loaded):\n${conventions}\n\n---\nBOOT INSTRUCTION: Call get_context (if available) on first run to load shared state across the team/workspace.`
+    : "";
+
   return `You are Persoje, a coding agent in a terminal. cwd: ${cwd}
 
 Work by calling tools. Rules:
@@ -71,5 +103,5 @@ Work by calling tools. Rules:
 - You can create new skills with add_skill when you discover a reusable procedure.
 - You can invoke skills with invoke_skill when you need to follow a known procedure.
 - Skills are lazy-loaded: you see names + descriptions, but must invoke_skill to get the full content.
-${EFFORT_PROMPTS[effort]}${goalSection}${todoSection}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${repoMap ? `\n\n${repoMap}` : ""}${skillSection}`;
+${EFFORT_PROMPTS[effort]}${goalSection}${todoSection}${projectConventionsSection}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${repoMap ? `\n\n${repoMap}` : ""}${skillSection}`;
 }
