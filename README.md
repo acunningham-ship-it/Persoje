@@ -121,6 +121,19 @@ Out-of-band and bounded — never more than ~1.2k tokens at session start:
 
 `/autonomous on` (requires a goal) launches a headless daemon that resumes your session and keeps working toward the goal until it reports done — surviving SSH disconnects and terminal closes via `nohup`, with a watchdog that restarts it on crash. Pure bash, no tmux/systemd/cron. Monitor with `tail -f ~/.local/share/persoje-autonomous/session.log`; stop with `/autonomous off`.
 
+## Multi-agent coordination
+
+Inside one session, the `task` tool spawns isolated-context sub-agents and returns only a capped summary (see *Why it's lean*).
+
+For *cross-session* coordination — several `persoje` (or other agent) sessions on one machine talking to each other, like a coordinator handing lanes to workers — pair Persoje with [intercom](https://github.com/acunningham-ship-it/intercom-mcp), a small MCP message bus: `join` / `ask` / `reply` / `broadcast`, plus a live `watch` dashboard of the fleet. Register it like any MCP server:
+
+```jsonc
+// ~/.config/persoje/mcp.json
+{ "servers": { "intercom": { "command": "node", "args": ["/path/to/intercom-mcp/server.js"] } } }
+```
+
+It stays a separate tool on purpose: Persoje composes it, it doesn't absorb it.
+
 ## Auto-update
 
 On launch (throttled to once every 4 hours, clean working tree only) Persoje fetches `origin`, and if it's **behind**, fast-forward pulls, rebuilds the binary, and re-execs it — so the `persoje` command stays current with this repo. Silent when up to date or offline. Skip with `--no-update` or `PERSOJE_NO_UPDATE=1`.
