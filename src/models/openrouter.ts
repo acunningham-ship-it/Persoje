@@ -2,6 +2,13 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import type { UsageReport } from "../core/events.ts";
 
+/** Reasoning parameter for effort-aware chain-of-thought / extended thinking. */
+export type ReasoningParam = {
+  effort?: "low" | "medium" | "high";
+  max_tokens?: number;
+  exclude?: boolean;
+};
+
 /** OpenAI-compatible message shapes (OpenRouter speaks this dialect for every model). */
 export interface ToolCallRequest {
   id: string;
@@ -37,6 +44,7 @@ export type StreamEvent =
   | { type: "text"; delta: string }
   | { type: "tool-calls"; calls: ToolCallRequest[] }
   | { type: "usage"; usage: UsageReport }
+  | { type: "reasoning"; content: unknown } // TODO: PHASE 2 — verify real shape (string vs array) from OpenRouter streaming responses
   | { type: "retry"; attempt: number; maxRetries: number; delayMs: number; reason: string };
 
 export interface ChatRequest {
@@ -51,6 +59,8 @@ export interface ChatRequest {
   cacheSystemPrompt?: boolean;
   /** OpenRouter provider routing object (pinning providers preserves cache continuity). */
   provider?: Record<string, unknown>;
+  /** Reasoning config: effort level or max_tokens for budget-constrained reasoning. */
+  reasoning?: ReasoningParam;
   signal?: AbortSignal;
   /** Max retry attempts (default 5). */
   maxRetries?: number;
@@ -174,6 +184,7 @@ export class OpenRouterClient {
     if (req.tools?.length) body.tools = req.tools;
     if (req.maxTokens) body.max_tokens = req.maxTokens;
     if (req.provider) body.provider = req.provider;
+    if (req.reasoning) body.reasoning = req.reasoning;
 
     const maxRetries = req.maxRetries ?? DEFAULT_MAX_RETRIES;
 
@@ -223,6 +234,11 @@ export class OpenRouterClient {
               if (tc.function?.arguments) existing.argsJson += tc.function.arguments;
               toolCalls.set(idx, existing);
             }
+          }
+
+          if (delta?.reasoning_content) {
+            yieldedAny = true;
+            yield { type: "reasoning", content: delta.reasoning_content };
           }
 
           if (chunk.usage) {

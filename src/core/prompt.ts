@@ -23,10 +23,10 @@ import { resolve, dirname } from "path";
 export type EffortLevel = "low" | "mid" | "high" | "max";
 
 const EFFORT_PROMPTS: Record<EffortLevel, string> = {
-  low: `Effort: LOW. Be fast. Give direct answers. Skip reading files you can guess. Minimal verification.`,
-  mid: `Effort: MID. Be balanced. Read before editing. Verify after changes. Be concise.`,
-  high: `Effort: HIGH. Be thorough. Explore broadly before acting. Verify every change. Explain your reasoning. Consider alternatives.`,
-  max: `Effort: MAX. Be exhaustive. Full analysis before any action. Verify every step. Consider edge cases and failure modes. Never skip verification. Think step-by-step. Explore all relevant files before deciding.`,
+  low: `Effort: LOW. Speed over precision. Skip reading whole files—grep for what you need. Assume common patterns. Make one attempt and move on. No verification pass.`,
+  mid: `Effort: MID. Balanced. Read the file before editing (full read if <500 lines, else grep + targeted sections). Test after edits. Be concise—one paragraph per message. Verify your changes work.`,
+  high: `Effort: HIGH. Thorough and deliberate. (1) PLAN: read broadly, identify all affected files, state assumptions. (2) EXECUTE: make targeted, confident changes. (3) VERIFY: run tests, confirm no regressions. Explain non-obvious choices. Consider edge cases.`,
+  max: `Effort: MAX. Exhaustive verification loop. (1) EXPLORE: read every relevant file, understand the entire context tree. (2) PLAN in detail: state all assumptions, identify failure modes. (3) EXECUTE with precision. (4) VERIFY thoroughly: tests, edge cases, integration points. (5) AUDIT: review your own changes for correctness. Tolerate slowness for certainty.`,
 };
 
 function findProjectConventions(cwd: string): string {

@@ -1,9 +1,11 @@
 import type { AgentEvent } from "./events.ts";
 import { Accounting } from "./tokens.ts";
-import { buildSystemPrompt } from "./prompt.ts";
+import { buildSystemPrompt, type EffortLevel } from "./prompt.ts";
 import { loadPersonality, type Personality } from "./personality.ts";
+import { effortPolicy } from "./effort.ts";
 import { ContextManager } from "../context/manager.ts";
 import { OpenRouterClient, type ToolCallRequest } from "../models/openrouter.ts";
+import { getCapabilities } from "../models/capabilities.ts";
 import { ToolError, type ToolContext, type ToolRegistry } from "../tools/types.ts";
 import type { PersojeConfig } from "../config/config.ts";
 import { closestToolName } from "../guardrails/fuzzy.ts";
@@ -267,11 +269,23 @@ export class Agent {
         let text = "";
         let toolCalls: ToolCallRequest[] = [];
 
-        // Effort-aware system prompt
+        // Effort-aware system prompt and policy
         const effort = (config as any).effort?.level ?? "mid";
         const personality = this.deps.personality ?? loadPersonality();
         const skillCatalog = this.deps.skills?.summaryForPrompt() ?? "";
         const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort, personality, skillCatalog, this.context.goal, this.context.todos);
+
+        // Compute effort policy: reasoning, maxTokens, toolBudget, scaffold
+        const modelCapabilities = getCapabilities(config.model.primary);
+        const policy = effortPolicy(effort as EffortLevel, modelCapabilities);
+
+        // Tool iteration budget: effort-aware cap on how many model→tool→model cycles per turn
+        // (distinct from cost ceiling above, which is a session-level USD limit).
+        if (iterations > policy.toolBudget) {
+          yield { type: "turn-end", reason: "max-iterations", iterations };
+          return;
+        }
+
         // Use cache-optimized build when prompt caching is enabled — inserts
         // cache_control breakpoints at stable turn boundaries for maximum
         // cache hit rate on OpenRouter/Anthropic (50% cost on cached tokens).
@@ -284,6 +298,8 @@ export class Agent {
           messages,
           tools: tools.schemas(),
           temperature: config.model.temperature,
+          maxTokens: policy.maxTokens,
+          reasoning: policy.reasoning,
           cacheSystemPrompt: config.context.cacheSystemPrompt,
           provider: config.openrouter.provider,
           signal,
@@ -296,6 +312,9 @@ export class Agent {
             if (ev.delta) yield { type: "text-delta", delta: ev.delta };
           } else if (ev.type === "tool-calls") {
             toolCalls = ev.calls;
+          } else if (ev.type === "reasoning") {
+            // Pass reasoning content through unchanged (Phase 2 renders it).
+            yield { type: "reasoning", content: ev.content };
           } else if (ev.type === "usage") {
             this.accounting.record(ev.usage);
             this.context.recordActualInput(ev.usage.inputTokens, ev.usage.cachedTokens); // calibrate gauge + compaction (and detect caching)
