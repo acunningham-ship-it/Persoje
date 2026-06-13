@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { buildSystemPrompt } from "../src/core/prompt.ts";
+import { buildSystemPrompt, findProjectConventions } from "../src/core/prompt.ts";
 import { mkdtemp, writeFile, mkdir, rm } from "fs/promises";
 import { join } from "path";
 
@@ -43,7 +43,9 @@ describe("buildSystemPrompt auto-load AGENTS.md", () => {
     const agentsContent = "# Project Configuration\nDefault model: qwen\nMemory path: ~/.memory";
     await writeFile(join(tempDir, "AGENTS.md"), agentsContent);
 
-    const p = buildSystemPrompt(tempDir);
+    // Agent loads conventions once at init via findProjectConventions and passes
+    // them into buildSystemPrompt; replicate that wiring here.
+    const p = buildSystemPrompt(tempDir, "", "", "mid", undefined, undefined, "", [], findProjectConventions(tempDir));
     expect(p).toContain(agentsContent);
   });
 
@@ -51,7 +53,7 @@ describe("buildSystemPrompt auto-load AGENTS.md", () => {
     const agentsContent = "# Project Config";
     await writeFile(join(tempDir, "AGENTS.md"), agentsContent);
 
-    const p = buildSystemPrompt(tempDir);
+    const p = buildSystemPrompt(tempDir, "", "", "mid", undefined, undefined, "", [], findProjectConventions(tempDir));
     expect(p).toContain("get_context");
   });
 
@@ -59,7 +61,7 @@ describe("buildSystemPrompt auto-load AGENTS.md", () => {
     const claudeContent = "# Claude Configuration\nRules for this project";
     await writeFile(join(tempDir, "CLAUDE.md"), claudeContent);
 
-    const p = buildSystemPrompt(tempDir);
+    const p = buildSystemPrompt(tempDir, "", "", "mid", undefined, undefined, "", [], findProjectConventions(tempDir));
     expect(p).toContain(claudeContent);
   });
 
@@ -72,7 +74,7 @@ describe("buildSystemPrompt auto-load AGENTS.md", () => {
       const agentsContent = "# Parent AGENTS\nConfig from parent dir";
       await writeFile(join(parentDir, "AGENTS.md"), agentsContent);
 
-      const p = buildSystemPrompt(childDir);
+      const p = buildSystemPrompt(childDir, "", "", "mid", undefined, undefined, "", [], findProjectConventions(childDir));
       expect(p).toContain(agentsContent);
     } finally {
       await rm(parentDir, { recursive: true, force: true });
@@ -91,7 +93,7 @@ describe("buildSystemPrompt auto-load AGENTS.md", () => {
     await writeFile(join(tempDir, "AGENTS.md"), agentsContent);
     await writeFile(join(tempDir, "CLAUDE.md"), claudeContent);
 
-    const p = buildSystemPrompt(tempDir);
+    const p = buildSystemPrompt(tempDir, "", "", "mid", undefined, undefined, "", [], findProjectConventions(tempDir));
     expect(p).toContain(agentsContent);
     expect(p).not.toContain(claudeContent);
   });

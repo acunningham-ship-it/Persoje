@@ -23,7 +23,8 @@ export function decodeEntities(s: string): string {
   return s.replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g, (m, code: string) => {
     if (code[0] === "#") {
       const cp = code[1] === "x" || code[1] === "X" ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
-      return Number.isFinite(cp) ? String.fromCodePoint(cp) : m;
+      // Guard against out-of-range code points; valid Unicode is 0x0–0x10FFFF
+      return Number.isFinite(cp) && cp >= 0 && cp <= 0x10FFFF ? String.fromCodePoint(cp) : m;
     }
     return NAMED_ENTITIES[code] ?? m;
   });
@@ -90,6 +91,8 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
       out += decoder.decode(value, { stream: true });
       if (total >= maxBytes) break;
     }
+    // Flush any remaining buffered bytes from the decoder (multi-byte chars at boundary)
+    out += decoder.decode();
   } finally {
     await reader.cancel().catch(() => {});
   }
@@ -146,6 +149,7 @@ function ipv4FromHost(host: string): [number, number, number, number] | null {
   // Bare 32-bit integer, e.g. http://2130706433/ == 127.0.0.1
   if (/^\d+$/.test(host)) {
     const n = Number(host);
+    // Bound to valid 32-bit unsigned range
     if (Number.isFinite(n) && n >= 0 && n <= 0xffffffff) {
       return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
     }

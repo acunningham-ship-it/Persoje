@@ -2,6 +2,7 @@ import type { ChatMessage, ToolCallRequest } from "../models/openrouter.ts";
 import { estimateTokens } from "../core/tokens.ts";
 import { truncate } from "../tools/truncate.ts";
 import type { TodoItem } from "../tools/types.ts";
+import { createHash } from "node:crypto";
 
 /**
  * ContextManager v3 — optimized context handling for OpenRouter.
@@ -69,6 +70,8 @@ export class ContextManager {
   private lastElidedCount = 0;
   /** Number of cache breakpoints inserted in the last build. */
   private lastCacheBreakpoints = 0;
+  /** SHA-256 fingerprint of the stable prefix content at last build. */
+  private lastPrefixHash = "";
 
   constructor(
     private budgetTokens: number,
@@ -126,6 +129,10 @@ export class ContextManager {
     this.lastBuildMessageCount = result.length;
     this.lastElidedCount = elidedCount;
     this.lastCacheBreakpoints = 0;
+
+    // Record the hash of the current prefix for stability detection
+    this.lastPrefixHash = this.computePrefixHash();
+
     return result;
   }
 
@@ -204,6 +211,9 @@ export class ContextManager {
     this.lastBuildMessageCount = result.length;
     this.lastCacheBreakpoints = cacheBreakpoints;
 
+    // Record the hash of the current prefix for stability detection
+    this.lastPrefixHash = this.computePrefixHash();
+
     return result;
   }
 
@@ -223,11 +233,65 @@ export class ContextManager {
   }
 
   /**
+   * Compute a SHA-256 fingerprint of the stable prefix content.
+   * The stable prefix is the conversation up to (and including) the cache breakpoint,
+   * which is everything except the final user message (if there is one).
+   *
+   * We hash: the count of messages in the prefix, then their actual content.
+   * Changes to message content or count invalidate the prefix.
+   */
+  private computePrefixHash(): string {
+    const hash = createHash("sha256");
+
+    // Find the last user message index - the prefix is everything up to (but not including) it
+    let lastUserIdx = -1;
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      if (this.messages[i]!.role === "user") {
+        lastUserIdx = i;
+        break;
+      }
+    }
+
+    // The prefix is everything before the last user message, or all messages if no user message
+    const prefixCount = lastUserIdx >= 0 ? lastUserIdx : this.messages.length;
+
+    // Hash the count of messages in the prefix
+    hash.update(String(prefixCount));
+
+    // Hash the content of each message in the prefix
+    for (let i = 0; i < prefixCount; i++) {
+      const m = this.messages[i];
+      if (m) {
+        hash.update(m.role);
+        hash.update(m.content ?? "");
+        // Include tool_call_id if present (for tool messages)
+        if ("tool_call_id" in m && m.tool_call_id) {
+          hash.update(m.tool_call_id);
+        }
+      }
+    }
+
+    return hash.digest("hex");
+  }
+
+  /**
    * Whether the conversation prefix is stable since the last build.
    * If true, the next API call will likely hit cache for the entire prefix.
+   *
+   * Stability is checked by comparing the fingerprint of the conversation prefix
+   * (everything except the final user message) against the hash recorded at last build.
+   *
+   * This ensures cache breakpoint placement is reliable and we don't falsely claim
+   * stability when a message was mutated or when new messages have been added after
+   * the stable boundary.
    */
   isPrefixStable(): boolean {
-    return this.messages.length === this.lastBuildMessageCount - 1; // -1 for system prompt
+    // If we haven't built yet (no hash recorded), we can't claim stability
+    if (this.lastPrefixHash === "") return false;
+
+    // Compute the current prefix hash and compare against the recorded one
+    const currentHash = this.computePrefixHash();
+    return currentHash === this.lastPrefixHash;
   }
 
   /**
@@ -373,6 +437,7 @@ export class ContextManager {
     this.messages = [];
     this.todos = [];
     this.generation++;
+    this.lastPrefixHash = ""; // reset prefix hash since context is cleared
   }
 
   /**
@@ -431,6 +496,7 @@ export class ContextManager {
       ...this.messages.slice(cut),
     ];
     this.generation++;
+    this.lastPrefixHash = ""; // reset prefix hash since message structure changed
     this.onCompact?.(this.messages);
     return { before, after: this.estimateTokensUsed() };
   }

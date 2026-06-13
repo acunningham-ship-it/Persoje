@@ -136,7 +136,7 @@ describe("effortPolicy", () => {
 
   describe("monotonic increase", () => {
     test("maxTokens increases or stays same across effort levels", () => {
-      const caps = { reasoning: "full" };
+      const caps: ModelCapabilities = { reasoning: "full" };
       const low = effortPolicy("low", caps);
       const mid = effortPolicy("mid", caps);
       const high = effortPolicy("high", caps);
@@ -148,7 +148,7 @@ describe("effortPolicy", () => {
     });
 
     test("toolBudget increases or stays same across effort levels", () => {
-      const caps = { reasoning: "full" };
+      const caps: ModelCapabilities = { reasoning: "full" };
       const low = effortPolicy("low", caps);
       const mid = effortPolicy("mid", caps);
       const high = effortPolicy("high", caps);

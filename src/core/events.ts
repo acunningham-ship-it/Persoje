@@ -19,7 +19,7 @@ export type AgentEvent =
   | { type: "turn-start"; turn: number }
   | { type: "text-delta"; delta: string }
   | { type: "text-end"; text: string }
-  | { type: "reasoning"; content: unknown } // TODO PHASE 2: verify OpenRouter reasoning shape
+  | { type: "reasoning"; content: string }
   | { type: "tool-start"; id: string; name: string; args: Record<string, unknown> }
   | {
       type: "tool-result";

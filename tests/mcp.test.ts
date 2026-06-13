@@ -93,6 +93,3 @@ describe("McpManager", () => {
     expect(manager.getToolNames()).toHaveLength(0);
   });
 });
-
-// Need these for the backup/restore in the first test
-import { readFileSync, writeFileSync } from "node:fs";

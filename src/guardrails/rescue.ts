@@ -1,4 +1,5 @@
 import type { ToolCallRequest } from "../models/openrouter.ts";
+import { randomUUID } from "node:crypto";
 
 /**
  * Text-embedded tool-call rescue: weak models often emit tool calls as text
@@ -14,7 +15,6 @@ export function rescueToolCalls(
 ): { calls: ToolCallRequest[]; cleanedText: string } {
   const calls: ToolCallRequest[] = [];
   let cleaned = text;
-  let counter = 0;
 
   const tryParse = (raw: string): boolean => {
     let parsed: any;
@@ -28,7 +28,7 @@ export function rescueToolCalls(
     if (typeof name !== "string" || !name) return false;
     if (!availableTools.includes(name) && !availableTools.some((t) => name.includes(t))) return false;
     calls.push({
-      id: `rescued_${Date.now()}_${counter++}`,
+      id: `rescued_${randomUUID()}`,
       name,
       argsJson: typeof args === "string" ? args : JSON.stringify(args),
     });

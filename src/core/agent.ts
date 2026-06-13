@@ -1,6 +1,6 @@
 import type { AgentEvent } from "./events.ts";
 import { Accounting } from "./tokens.ts";
-import { buildSystemPrompt, type EffortLevel } from "./prompt.ts";
+import { buildSystemPrompt, type EffortLevel, findProjectConventions } from "./prompt.ts";
 import { loadPersonality, type Personality } from "./personality.ts";
 import { effortPolicy } from "./effort.ts";
 import { ContextManager } from "../context/manager.ts";
@@ -67,6 +67,7 @@ export class Agent {
   readonly accounting = new Accounting();
   readonly readCache = new ReadCache();
   private turn = 0;
+  private cachedConventions: string;
 
   constructor(private deps: AgentDeps) {
     this.context = new ContextManager(
@@ -79,6 +80,9 @@ export class Agent {
     this.context.onCompact = () => {
       this.readCache.clear();
     };
+    // Cache project conventions at initialization to ensure stable system prompt
+    // prefix across all turns (no per-turn filesystem I/O).
+    this.cachedConventions = findProjectConventions(deps.cwd);
   }
 
   /** Compact the conversation via the compactor model (free-model grunt work). */
@@ -280,7 +284,7 @@ export class Agent {
         const effort = (config as any).effort?.level ?? "mid";
         const personality = this.deps.personality ?? loadPersonality();
         const skillCatalog = this.deps.skills?.summaryForPrompt() ?? "";
-        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort, personality, skillCatalog, this.context.goal, this.context.todos);
+        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort, personality, skillCatalog, this.context.goal, this.context.todos, this.cachedConventions);
 
         // Compute effort policy: reasoning, maxTokens, toolBudget, scaffold
         const modelCapabilities = getCapabilities(config.model.primary);
@@ -288,7 +292,7 @@ export class Agent {
 
         // Tool iteration budget: effort-aware cap on how many model→tool→model cycles per turn
         // (distinct from cost ceiling above, which is a session-level USD limit).
-        if (iterations > policy.toolBudget) {
+        if (iterations >= policy.toolBudget) {
           yield { type: "turn-end", reason: "max-iterations", iterations };
           return;
         }
@@ -396,8 +400,10 @@ export class Agent {
           // Independent read-only calls (the model batched several reads/searches)
           // — run them concurrently, then emit in call order. No side effects, so
           // ordering is irrelevant to correctness and we save the round-trip latency.
-          const batches = await Promise.all(toolCalls.map((c) => processCall(c)));
-          yield* emit(batches);
+          if (!signal?.aborted) {
+            const batches = await Promise.all(toolCalls.map((c) => processCall(c)));
+            yield* emit(batches);
+          }
         } else {
           // Anything that mutates (write/edit/bash/…) stays strictly sequential,
           // preserving the order the model intended (e.g. edit then run the test).
