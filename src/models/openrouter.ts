@@ -96,6 +96,7 @@ export class OpenRouterClient {
   constructor(
     private apiKey: string,
     private baseUrl = "https://openrouter.ai/api/v1",
+    private extraHeaders: Record<string, string> = {},
   ) {}
 
   /**
@@ -321,8 +322,7 @@ export class OpenRouterClient {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
-          "HTTP-Referer": "https://github.com/armani/persoje",
-          "X-Title": "Persoje",
+          ...this.extraHeaders,
         },
         body: JSON.stringify(body),
         signal,

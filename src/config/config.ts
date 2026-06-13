@@ -91,10 +91,34 @@ const ConfigSchema = z.object({
       /**
        * OpenRouter provider routing passthrough, e.g. {"order": ["deepinfra"], "allow_fallbacks": true}.
        * Pinning a provider keeps prompt-cache continuity on multi-provider models.
+       * @deprecated Use providers[activeProvider].routing instead.
        */
       provider: z.record(z.string(), z.unknown()).optional(),
     })
     .prefault({}),
+  providers: z
+    .record(
+      z.string(),
+      z.object({
+        /** Provider type: "openai-compat" (only supported type currently). */
+        type: z.enum(["openai-compat"]).default("openai-compat"),
+        /** Base URL for the provider's API. */
+        baseUrl: z.string(),
+        /** API key (plain); if not set, reads from apiKeyEnv or OPENROUTER_API_KEY. */
+        apiKey: z.string().optional(),
+        /** Name of environment variable to read the API key from (fallback). */
+        apiKeyEnv: z.string().optional(),
+        /** Extra headers to send with every request (e.g. X-Title for OpenRouter). */
+        extraHeaders: z.record(z.string(), z.string()).optional(),
+        /** Provider routing config (OpenRouter-specific, e.g. {"order": ["deepinfra"]}). */
+        routing: z.record(z.string(), z.unknown()).optional(),
+        /** Optional default model for this provider. */
+        model: z.string().optional(),
+      }),
+    )
+    .default({}),
+  /** Active provider name — defaults to "openrouter". */
+  activeProvider: z.string().default("openrouter"),
   theme: z
     .object({
       /** Theme name: amber (default), ocean, forest, rose, mono */
@@ -144,14 +168,78 @@ export async function loadConfig(cwd = process.cwd()): Promise<PersojeConfig> {
   return ConfigSchema.parse(raw);
 }
 
-export function resolveApiKey(config: PersojeConfig): string {
-  const key = config.openrouter.apiKey ?? process.env.OPENROUTER_API_KEY;
-  if (!key) {
-    throw new Error(
-      "No OpenRouter API key. Set OPENROUTER_API_KEY or add openrouter.apiKey to ~/.config/persoje/config.json",
-    );
+/**
+ * Resolve the active provider: synthesize from providers[activeProvider], falling back to
+ * the legacy openrouter block for backward compatibility. Returns baseUrl, apiKey,
+ * extraHeaders, routing, and optional model.
+ */
+export interface ResolvedProvider {
+  baseUrl: string;
+  apiKey: string;
+  extraHeaders?: Record<string, string>;
+  routing?: Record<string, unknown>;
+  model?: string;
+}
+
+export function resolveProvider(config: PersojeConfig): ResolvedProvider {
+  const active = config.activeProvider ?? "openrouter";
+  const providerDef = config.providers?.[active];
+
+  // If no provider defined and active is "openrouter", synthesize from legacy block.
+  if (!providerDef && active === "openrouter") {
+    const baseUrl = config.openrouter.baseUrl ?? "https://openrouter.ai/api/v1";
+    const apiKey = config.openrouter.apiKey ?? process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "No OpenRouter API key. Set OPENROUTER_API_KEY or add openrouter.apiKey to ~/.config/persoje/config.json",
+      );
+    }
+    return {
+      baseUrl,
+      apiKey,
+      extraHeaders: {
+        "HTTP-Referer": "https://github.com/armani/persoje",
+        "X-Title": "Persoje",
+      },
+      routing: config.openrouter.provider,
+    };
   }
-  return key;
+
+  // Provider explicitly defined.
+  if (providerDef) {
+    const baseUrl = providerDef.baseUrl;
+    if (!baseUrl) {
+      throw new Error(`Provider "${active}" has no baseUrl in config`);
+    }
+
+    // Resolve API key: explicit → env var → fallback to OPENROUTER_API_KEY for back-compat.
+    const apiKey = providerDef.apiKey ?? process.env[providerDef.apiKeyEnv ?? ""] ?? process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        `No API key for provider "${active}". Set ${providerDef.apiKeyEnv ?? "OPENROUTER_API_KEY"} ` +
+          `or add providers.${active}.apiKey to ~/.config/persoje/config.json`,
+      );
+    }
+
+    return {
+      baseUrl,
+      apiKey,
+      extraHeaders: providerDef.extraHeaders,
+      routing: providerDef.routing,
+      model: providerDef.model,
+    };
+  }
+
+  // No provider config and not openrouter — error.
+  throw new Error(
+    `Provider "${active}" not found in config.providers. ` +
+      `Add a provider entry or set activeProvider to "openrouter"`,
+  );
+}
+
+/** @deprecated Use resolveProvider() instead. */
+export function resolveApiKey(config: PersojeConfig): string {
+  return resolveProvider(config).apiKey;
 }
 
 /**
@@ -173,5 +261,15 @@ export async function setConfigValue(section: string, key: string, value: unknow
   const existing = (await readJsonIfExists(GLOBAL_CONFIG_PATH)) ?? {};
   const merged = { ...((existing[section] as Record<string, unknown>) ?? {}), [key]: value };
   await Bun.write(GLOBAL_CONFIG_PATH, JSON.stringify({ ...existing, [section]: merged }, null, 2) + "\n");
+  return GLOBAL_CONFIG_PATH;
+}
+
+/**
+ * Set the active provider (top-level key), persisting to global config.
+ * Backs `/provider` so the choice survives across sessions.
+ */
+export async function setActiveProvider(providerName: string): Promise<string> {
+  const existing = (await readJsonIfExists(GLOBAL_CONFIG_PATH)) ?? {};
+  await Bun.write(GLOBAL_CONFIG_PATH, JSON.stringify({ ...existing, activeProvider: providerName }, null, 2) + "\n");
   return GLOBAL_CONFIG_PATH;
 }

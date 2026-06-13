@@ -8,7 +8,7 @@ import type { SessionStore } from "../session/store.ts";
 import type { Router, ProfileStore } from "../router/router.ts";
 import type { OpenRouterClient } from "../models/openrouter.ts";
 import type { PersojeConfig } from "../config/config.ts";
-import { setDefaultModel, setConfigValue } from "../config/config.ts";
+import { setDefaultModel, setConfigValue, setActiveProvider } from "../config/config.ts";
 import type { LessonLog } from "../memory/lessons.ts";
 import type { FactStore } from "../memory/facts.ts";
 import type { SkillLibrary } from "../memory/skills.ts";
@@ -919,6 +919,28 @@ export function App({
           config.model.temperature = temps[level] ?? 0.3;
           void setConfigValue("effort", "level", level).catch(() => {});
           push({ kind: "info", text: `▸ effort → ${level} (temperature ${config.model.temperature}, saved)` });
+          break;
+        }
+        case "/provider": {
+          const name = rest[0];
+          if (!name) {
+            const active = config.activeProvider ?? "openrouter";
+            const available = Object.keys(config.providers ?? {});
+            if (available.length === 0) {
+              push({ kind: "info", text: `provider: ${active} (no custom providers configured)\nusage: /provider <name> to switch (this session; /dmodel to set default)` });
+            } else {
+              push({ kind: "info", text: `provider: ${active}\navailable: ${available.join(", ")}\nusage: /provider <name>` });
+            }
+            break;
+          }
+          const available = Object.keys(config.providers ?? {});
+          if (!available.includes(name) && name !== "openrouter") {
+            push({ kind: "error", text: `unknown provider "${name}" — available: openrouter${available.length ? ", " + available.join(", ") : ""}` });
+            break;
+          }
+          config.activeProvider = name;
+          void setActiveProvider(name).catch(() => {});
+          push({ kind: "info", text: `▸ provider → ${name} (this session; /provider again to list all)` });
           break;
         }
         case "/plan": {

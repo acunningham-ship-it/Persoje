@@ -4,7 +4,7 @@ import * as readline from "node:readline/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { Agent } from "./core/agent.ts";
-import { loadConfig, resolveApiKey, GLOBAL_CONFIG_DIR, GLOBAL_CONFIG_PATH } from "./config/config.ts";
+import { loadConfig, resolveApiKey, resolveProvider, GLOBAL_CONFIG_DIR, GLOBAL_CONFIG_PATH } from "./config/config.ts";
 import { OpenRouterClient } from "./models/openrouter.ts";
 import { ToolRegistry } from "./tools/types.ts";
 import { readTool, writeTool, editTool, multiEditTool, lsTool, globTool } from "./tools/file-tools.ts";
@@ -257,7 +257,8 @@ async function main(): Promise<void> {
   // `persoje dream` — offline memory consolidation on a free model.
   if (args[0] === "dream") {
     const config = await loadConfig();
-    const client = new OpenRouterClient(resolveApiKey(config), config.openrouter.baseUrl);
+    const provider = resolveProvider(config);
+    const client = new OpenRouterClient(provider.apiKey, provider.baseUrl, provider.extraHeaders);
     const { runDream } = await import("./memory/dream.ts");
     const result = await runDream({
       client,
@@ -276,9 +277,12 @@ async function main(): Promise<void> {
   // --model flag overrides config
   const modelIdx = args.indexOf("--model");
   if (modelIdx !== -1 && args[modelIdx + 1]) config.model.primary = args[modelIdx + 1]!;
+  // --provider flag overrides config
+  const providerIdx = args.indexOf("--provider");
+  if (providerIdx !== -1 && args[providerIdx + 1]) config.activeProvider = args[providerIdx + 1]!;
 
-  const apiKey = resolveApiKey(config);
-  const client = new OpenRouterClient(apiKey, config.openrouter.baseUrl);
+  const provider = resolveProvider(config);
+  const client = new OpenRouterClient(provider.apiKey, provider.baseUrl, provider.extraHeaders);
   const cwd = process.cwd();
 
   // Kick off the slow, independent startup work concurrently — file scan,
