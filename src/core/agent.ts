@@ -106,6 +106,12 @@ export class Agent {
     this.context.setSchemaTokens(deps.tools.schemaTokens());
   }
 
+  /** Force primer-mode re-detection on the next turn — call after the provider/client changes
+   *  (e.g. a live /provider switch), since detection is otherwise probed once and cached. */
+  resetPrimerDetection(): void {
+    this.primerModeCache = null;
+  }
+
   /** Compact the conversation via the compactor model (free-model grunt work). */
   async compact(): Promise<{ before: number; after: number } | null> {
     const { client, config } = this.deps;

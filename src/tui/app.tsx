@@ -6,9 +6,9 @@ import { truncate } from "../tools/truncate.ts";
 import type { Agent } from "../core/agent.ts";
 import type { SessionStore } from "../session/store.ts";
 import type { Router, ProfileStore } from "../router/router.ts";
-import type { OpenRouterClient } from "../models/openrouter.ts";
+import { OpenRouterClient } from "../models/openrouter.ts";
 import type { PersojeConfig } from "../config/config.ts";
-import { setDefaultModel, setConfigValue, setActiveProvider } from "../config/config.ts";
+import { setDefaultModel, setConfigValue, setActiveProvider, resolveProvider } from "../config/config.ts";
 import type { LessonLog } from "../memory/lessons.ts";
 import type { FactStore } from "../memory/facts.ts";
 import type { SkillLibrary } from "../memory/skills.ts";
@@ -966,7 +966,17 @@ export function App({
           }
           config.activeProvider = name;
           void setActiveProvider(name).catch(() => {});
-          push({ kind: "info", text: `▸ provider → ${name} (this session; /provider again to list all)` });
+          // Rebuild the client so the switch takes effect THIS session — it was built once at
+          // startup with the old provider's baseUrl, so without this the agent keeps hitting it.
+          try {
+            const resolved = resolveProvider(config);
+            agent.deps.client = new OpenRouterClient(resolved.apiKey, resolved.baseUrl, resolved.extraHeaders);
+            if (resolved.model) agent.model = resolved.model;
+            agent.resetPrimerDetection(); // re-probe /health for the new endpoint next turn
+            push({ kind: "info", text: `▸ provider → ${name} · ${resolved.baseUrl}${resolved.model ? ` · ${agent.model}` : ""} (live this session)` });
+          } catch (e: any) {
+            push({ kind: "error", text: `provider set to "${name}" but client rebuild failed — ${e?.message ?? e}` });
+          }
           break;
         }
         case "/plan": {

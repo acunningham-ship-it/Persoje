@@ -143,25 +143,12 @@ export async function preLaunchUpdate(args: string[], onStatus?: (msg: string) =
   // The install symlink (~/.local/bin/persoje → <root>/dist/persoje) already
   // points at what we just rebuilt — no extra install step needed.
 
-  onStatus?.(`updated ${local.slice(0, 7)} → ${remote.slice(0, 7)}`);
-
-  // Replace current process with the new binary.
-  // Bun's process.execPath points to the running binary.
-  // We re-exec with the same args (minus --no-update if present).
-  const cleanArgs = args.filter((a) => a !== "--no-update");
-  try {
-    // On Linux/macOS, Bun supports Bun.spawn + process.exit pattern,
-    // but the cleanest approach is execv via spawn + exit:
-    const binaryPath = resolve(root, "dist", "persoje");
-    const proc = Bun.spawn([binaryPath, ...cleanArgs.slice(2)], {
-      stdin: "inherit",
-      stdout: "inherit",
-      stderr: "inherit",
-    });
-    const exitCode = await proc.exited;
-    process.exit(exitCode);
-  } catch {
-    // If exec fails, just continue with the current (old) version
-    return;
-  }
+  // The rebuilt binary is in place (the install symlink already points at it), so the
+  // NEXT launch runs the new version automatically. We deliberately do NOT re-exec into
+  // the current process: spawning the new binary while this process lingers (still holding
+  // the controlling TTY) can leave the child's Ink TUI unable to acquire raw-mode stdin —
+  // the symptom is "boots then exits" / a dead shell. Continuing this session on the prior
+  // build and applying the update on the next launch is the safe, never-dead-shell behavior.
+  onStatus?.(`updated ${local.slice(0, 7)} → ${remote.slice(0, 7)} — restart persoje to apply (this session keeps running the previous build)`);
+  return;
 }
