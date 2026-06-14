@@ -1,14 +1,16 @@
 import type { AgentEvent } from "./events.ts";
 import { Accounting } from "./tokens.ts";
-import { buildSystemPrompt, type EffortLevel, findProjectConventions } from "./prompt.ts";
+import { buildSystemPrompt, buildRepoMapSection, buildPinsSection, type EffortLevel, findProjectConventions } from "./prompt.ts";
 import { loadPersonality, type Personality } from "./personality.ts";
 import { effortPolicy } from "./effort.ts";
 import { ContextManager } from "../context/manager.ts";
-import { OpenRouterClient, type ToolCallRequest } from "../models/openrouter.ts";
+import { OpenRouterClient, type ToolCallRequest, type ChatMessage } from "../models/openrouter.ts";
 import { getCapabilities } from "../models/capabilities.ts";
 import { ToolError, type ToolContext, type ToolRegistry } from "../tools/types.ts";
 import { ReadCache } from "../tools/read-cache.ts";
 import type { PersojeConfig } from "../config/config.ts";
+import { resolveProvider } from "../config/config.ts";
+import { detectPrimerMode } from "../guardrails/primer-detect.ts";
 import { closestToolName } from "../guardrails/fuzzy.ts";
 import { rescueToolCalls } from "../guardrails/rescue.ts";
 import { LoopDetector } from "../guardrails/loops.ts";
@@ -16,6 +18,7 @@ import { postEditCheck } from "../guardrails/verify.ts";
 import { assessDanger } from "../guardrails/danger.ts";
 import { resolve, join } from "node:path";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import { FactStore } from "../memory/facts.ts";
 
 /**
@@ -73,6 +76,8 @@ export class Agent {
   private turn = 0;
   private cachedConventions: string;
   private cachedQuirks: string[];
+  /** Cached primer-mode detection result per session (one probe, reuse for all turns). */
+  private primerModeCache: boolean | null = null;
 
   constructor(readonly deps: AgentDeps) {
     this.context = new ContextManager(
@@ -300,7 +305,28 @@ export class Agent {
         const effort = (config as any).effort?.level ?? "mid";
         const personality = this.deps.personality ?? loadPersonality();
         const skillCatalog = this.deps.skills?.summaryForPrompt() ?? "";
-        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort, personality, skillCatalog, this.context.goal, this.context.todos, this.cachedConventions, this.cachedQuirks);
+
+        // Primer mode: split prompt into segments (stable prefix + volatile pins).
+        // Non-primer (cloud/OpenRouter): fallback to current behavior (everything in seg1).
+        let primerMode = false;
+        if (this.primerModeCache === null) {
+          // First turn: probe the active provider for primer support.
+          const resolved = resolveProvider(config);
+          this.primerModeCache = await detectPrimerMode(resolved.baseUrl);
+        }
+        primerMode = this.primerModeCache;
+
+        // seg1 (byte-stable base): base rules + effort + quirks + conventions + personality + memory + skills.
+        // NOT in seg1: repo-map (→ seg3) and goal/todos (→ seg5 pins) — both volatile, kept out so seg1's hash stays stable.
+        const seg1 = buildSystemPrompt(cwd, "", this.deps.memoryContext ?? "", effort, personality, skillCatalog, this.cachedConventions, this.cachedQuirks);
+        const seg3RepoMap = buildRepoMapSection(this.deps.repoMap ?? "");
+        const pinsSection = buildPinsSection(this.context.goal, this.context.todos);
+
+        // Primer mode: systemPrompt is just seg1 (stable); seg3/pins are placed by buildForPrimer.
+        // Cloud mode: bundle seg1 + repo-map (seg3) + pins back into one system prompt (matches prior behavior).
+        const systemPrompt = primerMode
+          ? seg1
+          : seg1 + seg3RepoMap + pinsSection;
 
         // Compute effort policy: reasoning, maxTokens, toolBudget, scaffold
         const modelCapabilities = getCapabilities(config.model.primary);
@@ -313,12 +339,39 @@ export class Agent {
           return;
         }
 
-        // Use cache-optimized build when prompt caching is enabled — inserts
-        // cache_control breakpoints at stable turn boundaries for maximum
-        // cache hit rate on OpenRouter/Anthropic (50% cost on cached tokens).
-        const messages = config.context.cacheSystemPrompt
-          ? this.context.buildWithCacheBreakpoints(systemPrompt)
-          : this.context.build(systemPrompt);
+        // Build message array: primer-mode vs cloud mode.
+        // Primer mode: [system:seg1] [user: seg3+history+pins+current]
+        // Cloud mode: [system: seg1+pins] [user: history+current] OR multipart with cache_control
+        let messages: ChatMessage[];
+        if (primerMode) {
+          // Primer: [system:seg1] [system:seg3] [verbatim history] [pins] [current turn].
+          // The current turn is already the last user message in context, so it's not passed separately.
+          messages = this.context.buildForPrimer(seg1, seg3RepoMap, pinsSection);
+        } else {
+          // Cloud mode: current behavior (seg1 + pins bundled into system prompt)
+          messages = config.context.cacheSystemPrompt
+            ? this.context.buildWithCacheBreakpoints(systemPrompt)
+            : this.context.build(systemPrompt);
+        }
+
+        // Compute the seg1+seg2 disk-cache key for primer mode (X-Primer-Prefix-Hash header).
+        // Primer uses on-disk prefix reuse, not cloud cache_control. The hash covers exactly the
+        // byte-stable unit primer caches — the seg1 system text + serialized tool schemas — with a
+        // domain separator so seg1/tools can't concatenate ambiguously. seg1 carries no repo-map or
+        // goal/todos, so this stays stable for the session (changes only on a rare /effort or skill change).
+        let primerPrefixHash = "";
+        if (primerMode) {
+          const toolSchemas = JSON.stringify(tools.schemas());
+          const hashInput = `${seg1}\n\n__PERSOJE_TOOLS__\n\n${toolSchemas}`;
+          primerPrefixHash = createHash("sha256").update(hashInput).digest("hex");
+        }
+
+        // Build per-request headers (primer hash is added per-call, not per-provider).
+        const perRequestHeaders: Record<string, string> = {};
+        if (primerMode && primerPrefixHash) {
+          perRequestHeaders["X-Primer-Prefix-Hash"] = primerPrefixHash;
+        }
+
         const stream = client.stream({
           model: config.model.primary,
           fallbackModels: config.model.fallbacks,
@@ -327,10 +380,11 @@ export class Agent {
           temperature: config.model.temperature,
           maxTokens: policy.maxTokens,
           reasoning: policy.reasoning,
-          cacheSystemPrompt: config.context.cacheSystemPrompt,
+          cacheSystemPrompt: !primerMode && config.context.cacheSystemPrompt,
           provider: config.openrouter.provider,
           signal,
           maxRetries: (config as any).retry?.maxRetries ?? 5,
+          extraHeaders: perRequestHeaders,
         });
 
         for await (const ev of stream) {

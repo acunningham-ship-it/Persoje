@@ -140,6 +140,53 @@ export class ContextManager {
   }
 
   /**
+   * Build messages for primer (local prefix-reuse runtime). Layout, stable → volatile:
+   *   [system: seg1 (base rules, byte-stable)] → [system: seg3 (repo-map)] →
+   *   [verbatim append-only history turns] → [system: volatile goal/todo pins] → [current user turn]
+   *
+   * History turns are REAL messages, verbatim — never flattened or truncated — so primer can reuse the
+   * KV prefix turn-to-turn. The current user turn is already the last user message in history (it was
+   * added to context before this call), so it is NOT re-appended. Pins (goal/todos) ride as a transient
+   * system message inserted right before the current turn; they are never merged into a stored message,
+   * so every prior turn stays byte-identical across builds. seg1 is byte-stable regardless of goal/todos
+   * (they are not in it) → sha256(seg1_text + JSON(tool_schemas)) is primer's disk-cache key.
+   *
+   * For cloud providers (no primer), use build() or buildWithCacheBreakpoints() instead.
+   *
+   * TODO (INCREMENT 2 — APPEND-ONLY COMPACTION): history here still uses elideByPriority, which edits
+   * old turns under budget pressure and breaks append-only reuse. Increment 2 replaces it with a
+   * freeze-once summary block (keep the prefix; summarize dropped turns into a write-once segment).
+   */
+  buildForPrimer(seg1: string, seg3RepoMap: string, pinsSection: string): ChatMessage[] {
+    const { messages: elided, elidedCount } = this.elideByPriority();
+    this.lastElidedCount = elidedCount;
+
+    const result: ChatMessage[] = [{ role: "system", content: seg1 }];
+    // seg3: repo-map as its own stable segment, separate from seg1 so the seg1+2 disk key never moves.
+    if (seg3RepoMap) result.push({ role: "system", content: seg3RepoMap });
+
+    // Verbatim history (the current user turn is its last user message). Insert volatile pins as a
+    // transient message right before that current turn — never stored, so prior turns stay byte-stable.
+    const history = [...elided];
+    if (pinsSection) {
+      let lastUserIdx = -1;
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i]!.role === "user") { lastUserIdx = i; break; }
+      }
+      const pinMsg: ChatMessage = { role: "system", content: pinsSection };
+      if (lastUserIdx >= 0) history.splice(lastUserIdx, 0, pinMsg);
+      else history.push(pinMsg);
+    }
+    result.push(...history);
+
+    this.lastBuildMessageCount = result.length;
+    this.lastCacheBreakpoints = 0; // primer uses per-segment hashing, not cache_control
+    this.lastPrefixHash = this.computePrefixHash();
+
+    return result;
+  }
+
+  /**
    * Build messages with cache_control breakpoints for OpenRouter prompt caching.
    *
    * OpenRouter/Anthropic cache works on prefix matching. By marking stable

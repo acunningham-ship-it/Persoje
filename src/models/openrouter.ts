@@ -64,6 +64,8 @@ export interface ChatRequest {
   signal?: AbortSignal;
   /** Max retry attempts (default 5). */
   maxRetries?: number;
+  /** Per-request headers merged with client defaults (e.g. X-Primer-Prefix-Hash). */
+  extraHeaders?: Record<string, string>;
 }
 
 export class OpenRouterError extends Error {
@@ -241,7 +243,7 @@ export class OpenRouterClient {
     // yet; once text/usage is out, a re-request would duplicate output, so we propagate.
     let yieldedAny = false;
     for (let streamAttempt = 0; ; streamAttempt++) {
-      const response = await this.fetchWithRetry(body, req.signal, maxRetries, (attempt, delayMs, reason) => {
+      const response = await this.fetchWithRetry(body, req.signal, maxRetries, req.extraHeaders, (attempt, delayMs, reason) => {
         this._lastRetryEvent = { type: "retry", attempt, maxRetries, delayMs, reason };
       });
       if (!response.body) throw new OpenRouterError("Empty response body", 0, false);
@@ -357,6 +359,7 @@ export class OpenRouterClient {
     body: Record<string, unknown>,
     signal?: AbortSignal,
     maxRetries = DEFAULT_MAX_RETRIES,
+    perRequestHeaders?: Record<string, string>,
     onRetry?: (attempt: number, delayMs: number, reason: string) => void,
   ): Promise<Response> {
     let lastError: OpenRouterError | null = null;
@@ -368,6 +371,7 @@ export class OpenRouterClient {
           Authorization: `Bearer ${this.apiKey}`,
           "Content-Type": "application/json",
           ...this.extraHeaders,
+          ...perRequestHeaders,
         },
         body: JSON.stringify(body),
         signal,
