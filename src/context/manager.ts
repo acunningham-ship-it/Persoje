@@ -42,6 +42,8 @@ export interface BuildStats {
 
 export class ContextManager {
   private messages: ChatMessage[] = [];
+  /** Immutable frozen summary blocks (primer mode only). Append-only: never edited/reordered. */
+  private frozenSummaries: string[] = [];
   /** Persistence hook — the session store subscribes here. */
   onAppend?: (msg: ChatMessage) => void;
   /** Fired after compaction with the full post-compaction history (store rewrites itself). */
@@ -142,32 +144,38 @@ export class ContextManager {
   /**
    * Build messages for primer (local prefix-reuse runtime). Layout, stable → volatile:
    *   [system: seg1 (base rules, byte-stable)] → [system: seg3 (repo-map)] →
-   *   [verbatim append-only history turns] → [system: volatile goal/todo pins] → [current user turn]
+   *   [frozen summary blocks (immutable, in order)] → [verbatim live turns] →
+   *   [system: volatile goal/todo pins] → [current user turn]
    *
-   * History turns are REAL messages, verbatim — never flattened or truncated — so primer can reuse the
+   * Frozen summary blocks are immutable, written once per compaction, never rewritten.
+   * Live turns are REAL messages, verbatim — never flattened or truncated — so primer can reuse the
    * KV prefix turn-to-turn. The current user turn is already the last user message in history (it was
    * added to context before this call), so it is NOT re-appended. Pins (goal/todos) ride as a transient
    * system message inserted right before the current turn; they are never merged into a stored message,
-   * so every prior turn stays byte-identical across builds. seg1 is byte-stable regardless of goal/todos
+   * so every live turn stays byte-identical across builds. seg1 is byte-stable regardless of goal/todos
    * (they are not in it) → sha256(seg1_text + JSON(tool_schemas)) is primer's disk-cache key.
    *
    * For cloud providers (no primer), use build() or buildWithCacheBreakpoints() instead.
    *
-   * TODO (INCREMENT 2 — APPEND-ONLY COMPACTION): history here still uses elideByPriority, which edits
-   * old turns under budget pressure and breaks append-only reuse. Increment 2 replaces it with a
-   * freeze-once summary block (keep the prefix; summarize dropped turns into a write-once segment).
+   * INCREMENT 2 — APPEND-ONLY COMPACTION: frozen summary blocks are appended as immutable segments.
+   * Live history is NEVER elided (verbatim). After a freeze, all frozen blocks + remaining live turns
+   * are byte-identical on the next build (append-only reuse resumes).
    */
   buildForPrimer(seg1: string, seg3RepoMap: string, pinsSection: string): ChatMessage[] {
-    const { messages: elided, elidedCount } = this.elideByPriority();
-    this.lastElidedCount = elidedCount;
+    this.lastElidedCount = 0; // no elision in primer mode
 
     const result: ChatMessage[] = [{ role: "system", content: seg1 }];
     // seg3: repo-map as its own stable segment, separate from seg1 so the seg1+2 disk key never moves.
     if (seg3RepoMap) result.push({ role: "system", content: seg3RepoMap });
 
-    // Verbatim history (the current user turn is its last user message). Insert volatile pins as a
+    // Append immutable frozen summary blocks (in order, never rewritten).
+    for (const block of this.frozenSummaries) {
+      result.push({ role: "system", content: block });
+    }
+
+    // Verbatim live history (the current user turn is its last user message). Insert volatile pins as a
     // transient message right before that current turn — never stored, so prior turns stay byte-stable.
-    const history = [...elided];
+    const history = [...this.messages];
     if (pinsSection) {
       let lastUserIdx = -1;
       for (let i = history.length - 1; i >= 0; i--) {
@@ -495,6 +503,7 @@ export class ContextManager {
   clear(): void {
     this.messages = [];
     this.todos = [];
+    this.frozenSummaries = [];
     this.generation++;
     this.lastPrefixHash = ""; // reset prefix hash since context is cleared
   }
@@ -526,6 +535,8 @@ export class ContextManager {
    * into one brief, via the provided summarizer (a cheap/free model call).
    * Splits only at user-message boundaries so tool_call/tool pairs stay intact.
    * Returns token counts, or null if there wasn't enough history to compact.
+   *
+   * This is for cloud mode (non-primer). It injects a synthetic user message with the summary.
    */
   async compact(summarize: (transcript: string) => Promise<string>): Promise<{ before: number; after: number } | null> {
     const userIndexes = this.messages
@@ -554,6 +565,65 @@ export class ContextManager {
       { role: "user", content: `[Summary of earlier conversation]\n${summary}` },
       ...this.messages.slice(cut),
     ];
+    this.generation++;
+    this.lastPrefixHash = ""; // reset prefix hash since message structure changed
+    this.onCompact?.(this.messages);
+    return { before, after: this.estimateTokensUsed() };
+  }
+
+  /**
+   * Compact for primer mode: freeze old turns into an immutable summary block (append-only).
+   * Unlike cloud-mode compact(), this writes a system message to frozenSummaries (never rewritten)
+   * and removes old turns from this.messages. After freezing, live turns are byte-stable again.
+   *
+   * Primer mode expects frozen blocks to be byte-identical across builds (they are immutable);
+   * live turns follow the same rule (no elision). The first build after a freeze "resets" reuse
+   * (the new frozen block diverges the prefix), but subsequent builds are append-only.
+   *
+   * Returns token counts, or null if there wasn't enough history to freeze.
+   */
+  async compactForPrimer(summarize: (transcript: string) => Promise<string>): Promise<{ before: number; after: number } | null> {
+    const userIndexes = this.messages
+      .map((m, i) => (m.role === "user" && !m.content.startsWith("[Summary of earlier conversation]") ? i : -1))
+      .filter((i) => i !== -1);
+    if (userIndexes.length <= this.keepFullTurns) return null;
+
+    const cut = userIndexes[userIndexes.length - this.keepFullTurns]!;
+    const old = this.messages.slice(0, cut);
+    if (old.length === 0) return null;
+    const before = this.estimateTokensUsed();
+
+    const transcript = old
+      .map((m) => {
+        if (m.role === "tool") return `[tool result] ${m.content.slice(0, 300)}`;
+        if (m.role === "assistant" && "tool_calls" in m && m.tool_calls?.length) {
+          const calls = m.tool_calls.map((c) => `${c.function.name}(${c.function.arguments.slice(0, 120)})`).join(", ");
+          return `assistant: ${m.content}\n[called: ${calls}]`;
+        }
+        return `${m.role}: ${m.content}`;
+      })
+      .join("\n");
+
+    let summary = "";
+    try {
+      summary = await summarize(transcript);
+    } catch (e) {
+      // On failure, don't splice messages; restore before rethrowing
+      throw e;
+    }
+
+    // Append the immutable frozen block
+    this.frozenSummaries.push(summary);
+
+    // Remove old turns from live history (they are now captured in the frozen block)
+    try {
+      this.messages = this.messages.slice(cut);
+    } catch (e) {
+      // On splice error, pop the frozen block before rethrowing
+      this.frozenSummaries.pop();
+      throw e;
+    }
+
     this.generation++;
     this.lastPrefixHash = ""; // reset prefix hash since message structure changed
     this.onCompact?.(this.messages);

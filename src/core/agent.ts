@@ -132,6 +132,32 @@ export class Agent {
     });
   }
 
+  /** Compact for primer mode: freeze old turns into an immutable summary block (append-only). */
+  async compactForPrimer(): Promise<{ before: number; after: number } | null> {
+    const { client, config } = this.deps;
+    return this.context.compactForPrimer(async (transcript) => {
+      let summary = "";
+      const stream = client.stream({
+        model: config.model.compactor || config.model.primary,
+        messages: [
+          {
+            role: "user",
+            content:
+              `Summarize this coding-session transcript into a dense brief for an agent continuing the work. ` +
+              `Include: completed steps, files touched and how, current task state, key decisions/constraints. ` +
+              `Max 250 words, no preamble.\n\n${transcript}`,
+          },
+        ],
+        maxTokens: 600,
+        temperature: 0,
+      });
+      for await (const ev of stream) {
+        if (ev.type === "text") summary += ev.delta;
+      }
+      return summary.trim() || "(summary unavailable)";
+    });
+  }
+
   /**
    * Reflexion: turn a failure (or a user correction) into a concrete, reusable
    * lesson + an optional note about the model's own misbehavior. One cheap-model
@@ -291,10 +317,26 @@ export class Agent {
         }
         iterations++;
 
+        // Primer mode detection (cached after first turn): determines whether to use seg1/seg3/pins
+        // layout or bundle everything into one system prompt.
+        let primerMode = false;
+        if (this.primerModeCache === null) {
+          // First turn: probe the active provider for primer support.
+          const resolved = resolveProvider(config);
+          this.primerModeCache = await detectPrimerMode(resolved.baseUrl);
+        }
+        primerMode = this.primerModeCache;
+
         // Token discipline: compact before the call once history crosses the
         // threshold; inside a single long turn, fall back to eliding old tool results.
         if (this.context.needsCompaction()) {
-          const result = (await this.compact().catch(() => null)) ?? this.context.elideOldToolResults();
+          let result: { before: number; after: number } | null = null;
+          if (primerMode) {
+            result = await this.compactForPrimer().catch(() => null);
+          } else {
+            result = await this.compact().catch(() => null);
+          }
+          result ??= this.context.elideOldToolResults();
           if (result) yield { type: "compaction", beforeTokens: result.before, afterTokens: result.after };
         }
 
@@ -305,16 +347,6 @@ export class Agent {
         const effort = (config as any).effort?.level ?? "mid";
         const personality = this.deps.personality ?? loadPersonality();
         const skillCatalog = this.deps.skills?.summaryForPrompt() ?? "";
-
-        // Primer mode: split prompt into segments (stable prefix + volatile pins).
-        // Non-primer (cloud/OpenRouter): fallback to current behavior (everything in seg1).
-        let primerMode = false;
-        if (this.primerModeCache === null) {
-          // First turn: probe the active provider for primer support.
-          const resolved = resolveProvider(config);
-          this.primerModeCache = await detectPrimerMode(resolved.baseUrl);
-        }
-        primerMode = this.primerModeCache;
 
         // seg1 (byte-stable base): base rules + effort + quirks + conventions + personality + memory + skills.
         // NOT in seg1: repo-map (→ seg3) and goal/todos (→ seg5 pins) — both volatile, kept out so seg1's hash stays stable.
