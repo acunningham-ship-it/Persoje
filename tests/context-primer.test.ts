@@ -50,7 +50,7 @@ describe("ContextManager.buildForPrimer", () => {
     expect(a[0]!.content).toBe(b[0]!.content);
   });
 
-  test("pins ride as a transient message immediately before the current turn", () => {
+  test("pins ride as the LAST message, after the current turn (max append-only reuse)", () => {
     const cm = new ContextManager(1000, 0.8, 4);
     cm.addUser("continue");
     const pins = "\n\nSESSION GOAL: ship it\n\nWORKING PLAN:\n[~] step 1";
@@ -61,8 +61,10 @@ describe("ContextManager.buildForPrimer", () => {
       (m) => m.role === "system" && typeof m.content === "string" && m.content.includes("SESSION GOAL: ship it"),
     );
     const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
-    expect(pinIdx).toBeGreaterThanOrEqual(0);
-    expect(pinIdx).toBe(lastUserIdx - 1); // directly before the current turn
+    // Pins are the final, most-volatile segment — placed AFTER the current turn so the whole prefix
+    // through it stays byte-identical next build (no one-turn reuse lag).
+    expect(pinIdx).toBe(messages.length - 1);
+    expect(pinIdx).toBeGreaterThan(lastUserIdx);
   });
 
   test("no seg3 message when repo-map is empty", () => {

@@ -173,19 +173,15 @@ export class ContextManager {
       result.push({ role: "system", content: block });
     }
 
-    // Verbatim live history (the current user turn is its last user message). Insert volatile pins as a
-    // transient message right before that current turn — never stored, so prior turns stay byte-stable.
-    const history = [...this.messages];
-    if (pinsSection) {
-      let lastUserIdx = -1;
-      for (let i = history.length - 1; i >= 0; i--) {
-        if (history[i]!.role === "user") { lastUserIdx = i; break; }
-      }
-      const pinMsg: ChatMessage = { role: "system", content: pinsSection };
-      if (lastUserIdx >= 0) history.splice(lastUserIdx, 0, pinMsg);
-      else history.push(pinMsg);
-    }
-    result.push(...history);
+    // Verbatim live history (append-only) — the current user turn is its last message.
+    result.push(...this.messages);
+
+    // Volatile pins (goal/todos) go AFTER the current turn — the LAST, most-volatile position. Anything
+    // volatile placed BEFORE the current turn would diverge the prefix there and cost a one-turn reuse
+    // lag (the just-prior turn re-prefills every turn). Putting pins last keeps the entire prefix through
+    // the current turn byte-identical next build → full append-only reuse, no lag. Pins are transient
+    // (never stored in this.messages), so prior turns are never polluted.
+    if (pinsSection) result.push({ role: "system", content: pinsSection });
 
     this.lastBuildMessageCount = result.length;
     this.lastCacheBreakpoints = 0; // primer uses per-segment hashing, not cache_control
