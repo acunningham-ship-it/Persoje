@@ -173,15 +173,25 @@ export class ContextManager {
       result.push({ role: "system", content: block });
     }
 
-    // Verbatim live history (append-only) — the current user turn is its last message.
-    result.push(...this.messages);
-
-    // Volatile pins (goal/todos) go AFTER the current turn — the LAST, most-volatile position. Anything
-    // volatile placed BEFORE the current turn would diverge the prefix there and cost a one-turn reuse
-    // lag (the just-prior turn re-prefills every turn). Putting pins last keeps the entire prefix through
-    // the current turn byte-identical next build → full append-only reuse, no lag. Pins are transient
-    // (never stored in this.messages), so prior turns are never polluted.
-    if (pinsSection) result.push({ role: "system", content: pinsSection });
+    // Verbatim live history (append-only). Insert volatile pins (goal/todos) as a transient system
+    // message right BEFORE the current (last user) turn — never stored, so prior turns stay byte-stable.
+    //
+    // Why before, not after: chat models answer the LAST message, so the current USER turn must be last
+    // for coherent generation (a live 7B e2e confirmed pins-after-current makes the model respond to the
+    // trailing pins/directive instead of the user's question). The cost is a one-turn reuse lag (pins
+    // shift the divergence point by one turn) — that's fundamental when pins are volatile AND the user
+    // turn must be last, and it's the right trade: correctness over a marginal reuse gain.
+    const history = [...this.messages];
+    if (pinsSection) {
+      let lastUserIdx = -1;
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i]!.role === "user") { lastUserIdx = i; break; }
+      }
+      const pinMsg: ChatMessage = { role: "system", content: pinsSection };
+      if (lastUserIdx >= 0) history.splice(lastUserIdx, 0, pinMsg);
+      else history.push(pinMsg);
+    }
+    result.push(...history);
 
     this.lastBuildMessageCount = result.length;
     this.lastCacheBreakpoints = 0; // primer uses per-segment hashing, not cache_control

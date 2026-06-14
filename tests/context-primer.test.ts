@@ -50,7 +50,7 @@ describe("ContextManager.buildForPrimer", () => {
     expect(a[0]!.content).toBe(b[0]!.content);
   });
 
-  test("pins ride as the LAST message, after the current turn (max append-only reuse)", () => {
+  test("pins ride right before the current turn so the USER turn stays last", () => {
     const cm = new ContextManager(1000, 0.8, 4);
     cm.addUser("continue");
     const pins = "\n\nSESSION GOAL: ship it\n\nWORKING PLAN:\n[~] step 1";
@@ -61,10 +61,10 @@ describe("ContextManager.buildForPrimer", () => {
       (m) => m.role === "system" && typeof m.content === "string" && m.content.includes("SESSION GOAL: ship it"),
     );
     const lastUserIdx = messages.map((m) => m.role).lastIndexOf("user");
-    // Pins are the final, most-volatile segment — placed AFTER the current turn so the whole prefix
-    // through it stays byte-identical next build (no one-turn reuse lag).
-    expect(pinIdx).toBe(messages.length - 1);
-    expect(pinIdx).toBeGreaterThan(lastUserIdx);
+    // Pins go directly before the current turn; the current USER turn stays last for coherent
+    // generation (chat models answer the final message). One-turn reuse lag is the accepted cost.
+    expect(pinIdx).toBe(lastUserIdx - 1);
+    expect(messages[messages.length - 1]!.role).toBe("user");
   });
 
   test("no seg3 message when repo-map is empty", () => {
