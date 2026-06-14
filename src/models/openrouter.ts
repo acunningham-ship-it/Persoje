@@ -44,7 +44,7 @@ export type StreamEvent =
   | { type: "text"; delta: string }
   | { type: "tool-calls"; calls: ToolCallRequest[] }
   | { type: "usage"; usage: UsageReport }
-  | { type: "reasoning"; content: unknown } // TODO: PHASE 2 — verify real shape (string vs array) from OpenRouter streaming responses
+  | { type: "reasoning"; content: string }
   | { type: "retry"; attempt: number; maxRetries: number; delayMs: number; reason: string };
 
 export interface ChatRequest {
@@ -77,6 +77,51 @@ export class OpenRouterError extends Error {
 }
 
 const DEFAULT_MAX_RETRIES = 5;
+
+/**
+ * Normalize reasoning content to a string, handling multiple shapes:
+ * - string: pass through, capped to ~5000 chars
+ * - array of parts: extract text fields, join, cap
+ * - array of strings: join, cap
+ * - object: extract text field if present, cap
+ * - other: stringify and cap
+ *
+ * Cap: 5000 chars to prevent runaway reasoning output blocking the channel.
+ */
+function normalizeReasoningContent(content: unknown): string {
+  const maxChars = 5000;
+
+  // If already a string, cap and return
+  if (typeof content === "string") {
+    return content.length > maxChars ? content.substring(0, maxChars) + "…" : content;
+  }
+
+  let text = "";
+
+  // Handle array: could be array of parts (objects with text) or array of strings
+  if (Array.isArray(content)) {
+    text = content
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (typeof item === "object" && item !== null && "text" in item) return String(item.text ?? "");
+        return "";
+      })
+      .join("");
+  }
+
+  // Handle object with text field
+  if (typeof content === "object" && content !== null && !Array.isArray(content) && "text" in content) {
+    text = String(content.text ?? "");
+  }
+
+  // Fallback: stringify whatever it is
+  if (!text && content != null) {
+    text = String(content);
+  }
+
+  // Cap at ~5000 chars
+  return text.length > maxChars ? text.substring(0, maxChars) + "…" : text;
+}
 
 /**
  * Is a mid-stream SSE error worth retrying? OpenRouter returns these as an error
@@ -239,7 +284,7 @@ export class OpenRouterClient {
 
           if (delta?.reasoning_content) {
             yieldedAny = true;
-            yield { type: "reasoning", content: delta.reasoning_content };
+            yield { type: "reasoning", content: normalizeReasoningContent(delta.reasoning_content) };
           }
 
           if (chunk.usage) {

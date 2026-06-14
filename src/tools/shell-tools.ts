@@ -134,7 +134,8 @@ export const grepTool: Tool = {
   maxResultTokens: 2500,
   async execute({ pattern, path, glob }, ctx) {
     const target = resolve(ctx.cwd, path ?? ".");
-    const args = ["rg", "--line-number", "--no-heading", "--max-count", "20", "--max-columns", "250"];
+    const MAX_GREP_RESULTS = 20;
+    const args = ["rg", "--line-number", "--no-heading", "--max-count", String(MAX_GREP_RESULTS), "--max-columns", "250"];
     if (glob) args.push("--glob", glob);
     args.push("--", pattern, target);
 
@@ -152,6 +153,12 @@ export const grepTool: Tool = {
       throw new ToolError(`grep failed: ${stderr.slice(0, 200)}`);
     }
     // Make paths relative to cwd for readability/token-lean output.
-    return stdout.replaceAll(ctx.cwd + "/", "").trim() || "No matches.";
+    const normalized = stdout.replaceAll(ctx.cwd + "/", "").trim();
+    if (normalized === "") return "No matches.";
+
+    // Check if results were capped: count newlines to detect if we hit the limit.
+    const resultCount = normalized.split("\n").length;
+    const capped = resultCount >= MAX_GREP_RESULTS ? "\n[results capped — narrow the pattern to see more]" : "";
+    return normalized + capped;
   },
 };

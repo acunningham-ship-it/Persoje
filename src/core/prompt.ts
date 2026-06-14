@@ -29,7 +29,7 @@ const EFFORT_PROMPTS: Record<EffortLevel, string> = {
   max: `Effort: MAX. Exhaustive verification loop. (1) EXPLORE: read every relevant file, understand the entire context tree. (2) PLAN in detail: state all assumptions, identify failure modes. (3) EXECUTE with precision. (4) VERIFY thoroughly: tests, edge cases, integration points. (5) AUDIT: review your own changes for correctness. Tolerate slowness for certainty.`,
 };
 
-function findProjectConventions(cwd: string): string {
+export function findProjectConventions(cwd: string): string {
   let current = cwd;
 
   while (true) {
@@ -61,6 +61,7 @@ export function buildSystemPrompt(
   skillCatalog?: string,
   goal = "",
   todos: TodoItem[] = [],
+  conventions = "",
 ): string {
   const personalitySection = personality
     ? `\n\n${personalityPrompt(personality)}`
@@ -82,8 +83,7 @@ export function buildSystemPrompt(
     ? `\n\nWORKING PLAN (update_todos to revise; mark steps done as you go):\n${renderTodos(todos)}`
     : "";
 
-  // Auto-load project conventions (AGENTS.md or CLAUDE.md) if found.
-  const conventions = findProjectConventions(cwd);
+  // Use cached project conventions (loaded once at Agent initialization).
   const projectConventionsSection = conventions
     ? `\n\nPROJECT CONVENTIONS (auto-loaded):\n${conventions}\n\n---\nBOOT INSTRUCTION: Call get_context (if available) on first run to load shared state across the team/workspace.`
     : "";
