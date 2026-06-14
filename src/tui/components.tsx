@@ -174,6 +174,7 @@ export function StatusBar({
   activeTheme,
   cacheHit,
   toolsThisTurn,
+  schemasTokens,
 }: {
   model: string;
   ctxUsed: number;
@@ -192,6 +193,8 @@ export function StatusBar({
   cacheHit?: number;
   /** Tool calls made during the current turn. */
   toolsThisTurn?: number;
+  /** Token cost of serialized tool schemas. */
+  schemasTokens?: number;
 }): React.ReactElement {
   const t = activeTheme ?? theme;
   const [, force] = useState(0);
@@ -220,6 +223,7 @@ export function StatusBar({
       {cacheHit && cacheHit > 0 ? (
         <Text color={cacheHit >= 0.5 ? t.ok : t.dim}> ⚡{Math.round(cacheHit * 100)}%</Text>
       ) : null}
+      {schemasTokens ? <Text dimColor> ~{schemasTokens}📋</Text> : null}
       {sep}
       <Text dimColor>${cost < 0.01 ? cost.toFixed(5) : cost.toFixed(3)}</Text>
       {effort ? (

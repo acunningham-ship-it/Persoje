@@ -98,3 +98,35 @@ describe("buildSystemPrompt auto-load AGENTS.md", () => {
     expect(p).not.toContain(claudeContent);
   });
 });
+
+describe("buildSystemPrompt quirks section", () => {
+  test("renders quirks when provided", () => {
+    const p = buildSystemPrompt("/repo", "", "", "mid", undefined, undefined, "", [], "", ["malforms JSON", "loops on iteration"]);
+    expect(p).toContain("Known quirks of this model");
+    expect(p).toContain("• malforms JSON");
+    expect(p).toContain("• loops on iteration");
+  });
+
+  test("caps quirks to top 3", () => {
+    const manyQuirks = Array.from({ length: 10 }, (_, i) => `quirk-${i}`);
+    const p = buildSystemPrompt("/repo", "", "", "mid", undefined, undefined, "", [], "", manyQuirks);
+    expect(p).toContain("quirk-0");
+    expect(p).toContain("quirk-1");
+    expect(p).toContain("quirk-2");
+    expect(p).not.toContain("quirk-3"); // Should be capped
+  });
+
+  test("omits quirks section when empty", () => {
+    const p = buildSystemPrompt("/repo", "", "", "mid", undefined, undefined, "", [], "", []);
+    expect(p).not.toContain("Known quirks of this model");
+  });
+
+  test("quirks section appears before SESSION GOAL", () => {
+    const p = buildSystemPrompt("/repo", "", "", "mid", undefined, undefined, "test goal", [], "", ["test-quirk"]);
+    const quirkIdx = p.indexOf("Known quirks of this model");
+    const goalIdx = p.indexOf("SESSION GOAL");
+    expect(quirkIdx).toBeGreaterThan(-1);
+    expect(goalIdx).toBeGreaterThan(-1);
+    expect(quirkIdx).toBeLessThan(goalIdx);
+  });
+});

@@ -165,8 +165,10 @@ interface FailureRecord {
 export class Router {
   private failures = new Map<string, FailureRecord[]>();
   private lastEscalated = new Map<string, number>(); // per-model count when last escalated
+  private escalationDepth = new Map<string, number>(); // tracks escalation chain depth per model
   private failureThreshold: number;
   private profiles: ProfileStore;
+  private configEscalateTo: string;
   public enabled: boolean;
   public mode: "offer" | "auto";
 
@@ -175,11 +177,13 @@ export class Router {
     mode: "offer" | "auto";
     failureThreshold: number;
     profiles: ProfileStore;
+    escalateTo?: string;
   }) {
     this.enabled = opts.enabled;
     this.mode = opts.mode;
     this.failureThreshold = opts.failureThreshold;
     this.profiles = opts.profiles;
+    this.configEscalateTo = opts.escalateTo ?? "";
   }
 
   /** Record a failure for a model. */
@@ -197,10 +201,15 @@ export class Router {
     return records.filter((r) => now - r.at < windowMs).length;
   }
 
+  /** Get the escalation depth for a model. Depth resets per-session (in-memory tracking). */
+  getEscalationDepth(modelId: string): number {
+    return this.escalationDepth.get(modelId) ?? 0;
+  }
+
   /**
    * Check if escalation is warranted. Returns null if disabled or below threshold.
    * Otherwise returns { target, reason }. Avoids repeat-firing — once triggered,
-   * requires 5+ new failures to trigger again.
+   * requires 5+ new failures to trigger again. Caps at depth 3 to avoid infinite chains.
    */
   shouldEscalate(modelId: string): { target: string | null; reason: string } | null {
     if (!this.enabled) return null;
@@ -218,6 +227,21 @@ export class Router {
     const reason = `${count} failures (${Array.from(kinds).join(", ")}) in last 10m`;
 
     const profile = this.profiles.get(modelId);
-    return { target: profile.escalateTo ?? null, reason };
+    const depth = this.getEscalationDepth(modelId);
+
+    // Depth cap: max 3 escalations. Once hit, suggest no further targets.
+    if (depth >= 3) {
+      return {
+        target: null,
+        reason: `${reason} — escalation chain exhausted (attempted 3 escalations) · consider /effort high, a stronger base model, or rephrasing the task`,
+      };
+    }
+
+    // Find the escalation target: profile first, then config fallback.
+    const target = profile.escalateTo || (this.configEscalateTo ? this.configEscalateTo : null);
+    if (target) {
+      this.escalationDepth.set(modelId, depth + 1);
+    }
+    return { target, reason };
   }
 }

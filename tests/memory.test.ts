@@ -114,6 +114,17 @@ describe("FactStore", () => {
     }
   });
 
+  test("getQuirks returns empty array for model with no quirks", () => {
+    const dir = createTempDir();
+    try {
+      const store = new FactStore(dir);
+      const quirks = store.getQuirks("model/never-seen");
+      expect(quirks).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
   test("remove fact", () => {
     const dir = createTempDir();
     try {

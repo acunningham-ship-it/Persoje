@@ -62,6 +62,7 @@ export function buildSystemPrompt(
   goal = "",
   todos: TodoItem[] = [],
   conventions = "",
+  quirks: string[] = [],
 ): string {
   const personalitySection = personality
     ? `\n\n${personalityPrompt(personality)}`
@@ -70,6 +71,16 @@ export function buildSystemPrompt(
   const skillSection = skillCatalog
     ? `\n\n${skillCatalog}`
     : "";
+
+  // Known quirks of this model: brief coaching to avoid known failure modes.
+  // Render top 3 only, capped at ~100 tokens for cache stability.
+  const quirksSection =
+    quirks.length > 0
+      ? `\n\nKnown quirks of this model:\n${quirks
+          .slice(0, 3)
+          .map((q) => `• ${q}`)
+          .join("\n")}`
+      : "";
 
   // Goal anchor: when set, pinned every turn so the model never drifts. When
   // unset, instruct the model to establish it first (ambiguity-gated).
@@ -103,5 +114,5 @@ Work by calling tools. Rules:
 - You can create new skills with add_skill when you discover a reusable procedure.
 - You can invoke skills with invoke_skill when you need to follow a known procedure.
 - Skills are lazy-loaded: you see names + descriptions, but must invoke_skill to get the full content.
-${EFFORT_PROMPTS[effort]}${goalSection}${todoSection}${projectConventionsSection}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${repoMap ? `\n\n${repoMap}` : ""}${skillSection}`;
+${EFFORT_PROMPTS[effort]}${quirksSection}${goalSection}${todoSection}${projectConventionsSection}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${repoMap ? `\n\n${repoMap}` : ""}${skillSection}`;
 }

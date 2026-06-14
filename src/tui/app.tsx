@@ -305,6 +305,15 @@ export function App({
       router.recordFailure(model, kind);
       const esc = router.shouldEscalate(model);
       if (!esc) return;
+
+      // Emit router event to the stream (for history rendering)
+      agent.deps?.onRouterEvent?.({
+        message: esc.reason,
+        target: esc.target,
+        mode: router.mode,
+        currentModel: model,
+      });
+
       if (router.mode === "auto" && esc.target) {
         agent.model = esc.target;
         push({ kind: "info", text: `⇄ router: ${esc.reason} — auto-switched to ${esc.target}` });
@@ -347,6 +356,23 @@ export function App({
     void maybeCanary(agent.model);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Wire onRouterEvent: pre-canary the escalation target ONLY on an actual
+  // auto-switch. In "offer" mode the user hasn't adopted the model yet (/model
+  // canaries it when they switch), so we don't spend tokens probing a model
+  // they may never use. Dedup via the canaried Set; never canary the current model.
+  useEffect(() => {
+    agent.deps.onRouterEvent = async (event) => {
+      if (
+        event.mode === "auto" &&
+        event.target &&
+        event.target !== event.currentModel &&
+        !canaried.current.has(event.target)
+      ) {
+        void maybeCanary(event.target, false);
+      }
+    };
+  }, [agent, maybeCanary]);
 
   // Batch streaming deltas: flush at 80ms so Ink isn't re-rendering per token.
   useEffect(() => {
@@ -698,7 +724,7 @@ export function App({
             text: [
               `model      ${agent.model} (${p.toolQuality}${p.canary ? `, canary ${p.canary.score}/${p.canary.total}` : ""})`,
               `router     ${router.enabled ? "on" : "off"} · ${router.mode} · ${router.failureCount(agent.model)} recent failures`,
-              `session    ${sessionId} · ~${stats.totalTokens} tok history · ${fmtCost(t.cost)}`,
+              `session    ${sessionId} · ~${stats.totalTokens} tok (msgs) · ${stats.schemaTokens} tok (schemas) · ${fmtCost(t.cost)}`,
               `context    ${stats.totalMessages} msgs · ${stats.elidedCount} elided · ${stats.cacheBreakpoints} cache pts · prefix ${stats.prefixStable ? "stable ✓" : "dirty"}`,
               `memory     ${factCount} facts · ${lessons.recent(100).length} lessons · ${skills.list().length} skills`,
               `repo-map   ${agent.repoMap ? `~${Math.ceil(agent.repoMap.length / 4)} tok` : "none"}`,
@@ -1400,6 +1426,7 @@ export function App({
               iterations={turnIterations}
               toolsThisTurn={turnTools}
               cacheHit={agent.context.cacheHitRatio}
+              schemasTokens={agent.context.buildStats().schemaTokens}
               planMode={(config as any).planMode ?? false}
               trust={trust}
               activeTheme={activeTheme}

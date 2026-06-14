@@ -412,6 +412,7 @@ async function main(): Promise<void> {
       mode: config.router.mode,
       failureThreshold: config.router.failureThreshold,
       profiles,
+      escalateTo: config.router.escalateTo,
     });
 
     const { render } = await import("ink");

@@ -14,7 +14,9 @@ import { rescueToolCalls } from "../guardrails/rescue.ts";
 import { LoopDetector } from "../guardrails/loops.ts";
 import { postEditCheck } from "../guardrails/verify.ts";
 import { assessDanger } from "../guardrails/danger.ts";
-import { resolve } from "node:path";
+import { resolve, join } from "node:path";
+import { homedir } from "node:os";
+import { FactStore } from "../memory/facts.ts";
 
 /**
  * Tools with no side effects and no ordering constraints — safe to run
@@ -46,6 +48,8 @@ export interface AgentDeps {
   approve?: (name: string, args: Record<string, unknown>, dangerReason?: string) => Promise<boolean>;
   /** Guardrail failure sink — the router subscribes to learn which models misbehave. */
   onFailure?: (kind: "validation" | "loop" | "syntax" | "rescue", model: string) => void;
+  /** Router event sink — escalation suggestions and warnings. */
+  onRouterEvent?: (event: { message: string; target: string | null; mode: string; currentModel: string }) => void;
   /** Path to the session transcript .md — given to the transcript tool. */
   transcriptPath?: string;
   /** Fired when the model (or /goal) sets the goal — persisted by the session store. */
@@ -68,8 +72,9 @@ export class Agent {
   readonly readCache = new ReadCache();
   private turn = 0;
   private cachedConventions: string;
+  private cachedQuirks: string[];
 
-  constructor(private deps: AgentDeps) {
+  constructor(readonly deps: AgentDeps) {
     this.context = new ContextManager(
       deps.config.context.budgetTokens,
       deps.config.context.compactionThreshold,
@@ -83,6 +88,17 @@ export class Agent {
     // Cache project conventions at initialization to ensure stable system prompt
     // prefix across all turns (no per-turn filesystem I/O).
     this.cachedConventions = findProjectConventions(deps.cwd);
+
+    // Fetch and cache the active model's quirks once at init. Quirks are stable
+    // per session — only change if the user explicitly switches models.
+    const factDir = join(homedir(), ".config", "persoje", "memory");
+    const facts = new FactStore(factDir);
+    this.cachedQuirks = facts.getQuirks(deps.config.model.primary);
+
+    // Wire schema cost into context for /status display — compute schemas once to populate cache,
+    // then store the cost; schemas are memoized and stable across turns.
+    deps.tools.schemas();
+    this.context.setSchemaTokens(deps.tools.schemaTokens());
   }
 
   /** Compact the conversation via the compactor model (free-model grunt work). */
@@ -284,7 +300,7 @@ export class Agent {
         const effort = (config as any).effort?.level ?? "mid";
         const personality = this.deps.personality ?? loadPersonality();
         const skillCatalog = this.deps.skills?.summaryForPrompt() ?? "";
-        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort, personality, skillCatalog, this.context.goal, this.context.todos, this.cachedConventions);
+        const systemPrompt = buildSystemPrompt(cwd, this.deps.repoMap, this.deps.memoryContext, effort, personality, skillCatalog, this.context.goal, this.context.todos, this.cachedConventions, this.cachedQuirks);
 
         // Compute effort policy: reasoning, maxTokens, toolBudget, scaffold
         const modelCapabilities = getCapabilities(config.model.primary);

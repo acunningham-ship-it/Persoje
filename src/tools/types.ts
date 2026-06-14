@@ -59,6 +59,9 @@ function stripSchemaNoise(schema: Record<string, unknown>): Record<string, unkno
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>();
+  private schemasCache: ToolSchema[] | null = null;
+  private schemaCacheTokens = 0;
+  private lastToolNames: string[] = [];
 
   register(tool: Tool): void {
     this.tools.set(tool.name, tool);
@@ -86,9 +89,20 @@ export class ToolRegistry {
     return r;
   }
 
-  /** OpenAI-format schemas for the API request. */
+  /** OpenAI-format schemas for the API request (memoized). */
   schemas(): ToolSchema[] {
-    return this.all().map((t) => ({
+    const currentNames = this.names();
+    // Check if tool list changed — if not, return cached schemas
+    if (
+      this.schemasCache !== null &&
+      this.lastToolNames.length === currentNames.length &&
+      this.lastToolNames.every((name, i) => name === currentNames[i])
+    ) {
+      return this.schemasCache;
+    }
+
+    // Recompute schemas when tool list changes
+    this.schemasCache = this.all().map((t) => ({
       type: "function",
       function: {
         name: t.name,
@@ -96,5 +110,24 @@ export class ToolRegistry {
         parameters: stripSchemaNoise(z.toJSONSchema(t.args)),
       },
     }));
+    this.lastToolNames = [...currentNames];
+
+    // Estimate token count (simple heuristic: JSON length / 4)
+    const serialized = JSON.stringify(this.schemasCache);
+    this.schemaCacheTokens = Math.ceil(serialized.length / 4);
+
+    return this.schemasCache;
+  }
+
+  /** Return the token cost of the current schemas (computed at last call to schemas()). */
+  schemaTokens(): number {
+    return this.schemaCacheTokens;
+  }
+
+  /** Invalidate schema cache if tool registry mutates dynamically. */
+  invalidateSchemaCache(): void {
+    this.schemasCache = null;
+    this.lastToolNames = [];
+    this.schemaCacheTokens = 0;
   }
 }

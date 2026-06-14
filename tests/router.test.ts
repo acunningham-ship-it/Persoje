@@ -173,4 +173,128 @@ describe("Router escalation", () => {
     const allCount = router.failureCount("test/model", 1000); // 1s window — catch both
     expect(allCount).toBe(2);
   });
+
+  test("escalation uses config fallback when profile has no target", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "persoje-test-"));
+    const tempPath = join(tempDir, "models.json");
+    const store = new ProfileStore(tempPath);
+    const router = new Router({
+      enabled: true,
+      mode: "offer",
+      failureThreshold: 2,
+      profiles: store,
+      escalateTo: "fallback/model",
+    });
+    router.recordFailure("test/weak", "validation");
+    router.recordFailure("test/weak", "loop");
+    const esc = router.shouldEscalate("test/weak");
+    expect(esc).not.toBeNull();
+    expect(esc?.target).toBe("fallback/model");
+  });
+
+  test("escalation depth caps at 3", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "persoje-test-"));
+    const tempPath = join(tempDir, "models.json");
+    const store = new ProfileStore(tempPath);
+
+    // Set up a chain: modelA → modelB, modelB → modelC (profile.escalateTo)
+    const profA = seedProfile("model/a");
+    profA.escalateTo = "model/b";
+    store.upsert(profA);
+
+    const profB = seedProfile("model/b");
+    profB.escalateTo = "model/c";
+    store.upsert(profB);
+
+    const router = new Router({
+      enabled: true,
+      mode: "offer",
+      failureThreshold: 1,
+      profiles: store,
+      escalateTo: "", // no final fallback — test the depth cap directly
+    });
+
+    // Escalate on modelA: depth 0 → 1, target modelB
+    router.recordFailure("model/a", "validation");
+    let esc = router.shouldEscalate("model/a");
+    expect(esc?.target).toBe("model/b");
+    expect(router.getEscalationDepth("model/a")).toBe(1);
+
+    // Escalate on modelB: depth 0 → 1, target modelC
+    router.recordFailure("model/b", "validation");
+    esc = router.shouldEscalate("model/b");
+    expect(esc?.target).toBe("model/c");
+    expect(router.getEscalationDepth("model/b")).toBe(1);
+
+    // Escalate on modelC: depth 0, target null (no escalateTo set, no config fallback)
+    router.recordFailure("model/c", "validation");
+    esc = router.shouldEscalate("model/c");
+    expect(esc?.target).toBeNull();
+    expect(router.getEscalationDepth("model/c")).toBe(0); // no target, no depth increment
+    expect(esc?.reason).toContain("1 failures"); // basic reason, no "exhausted" yet
+
+    // Simulate a second escalation chain on modelA (5+ new failures after first escalation):
+    // depth becomes 1, can escalate again
+    for (let i = 0; i < 5; i++) router.recordFailure("model/a", "validation");
+    esc = router.shouldEscalate("model/a");
+    expect(esc?.target).toBe("model/b"); // second escalation
+    expect(router.getEscalationDepth("model/a")).toBe(2);
+
+    // After 3 escalations, depth caps
+    for (let i = 0; i < 5; i++) router.recordFailure("model/a", "validation");
+    esc = router.shouldEscalate("model/a");
+    expect(esc?.target).toBe("model/b"); // third escalation
+    expect(router.getEscalationDepth("model/a")).toBe(3);
+
+    // Fourth attempt: depth >= 3, return null even if target exists
+    for (let i = 0; i < 5; i++) router.recordFailure("model/a", "validation");
+    esc = router.shouldEscalate("model/a");
+    expect(esc?.target).toBeNull();
+    expect(esc?.reason).toContain("exhausted");
+    expect(router.getEscalationDepth("model/a")).toBe(3); // depth doesn't increment past cap
+  });
+
+  test("escalation depth resets per-session (in-memory)", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "persoje-test-"));
+    const tempPath = join(tempDir, "models.json");
+    const store = new ProfileStore(tempPath);
+
+    const router1 = new Router({
+      enabled: true,
+      mode: "offer",
+      failureThreshold: 1,
+      profiles: store,
+    });
+
+    router1.recordFailure("model/test", "validation");
+    const esc1 = router1.shouldEscalate("model/test");
+    expect(router1.getEscalationDepth("model/test")).toBe(0); // no target, no depth increment
+
+    // New router (new session): depth is reset
+    const router2 = new Router({
+      enabled: true,
+      mode: "offer",
+      failureThreshold: 1,
+      profiles: store,
+    });
+    expect(router2.getEscalationDepth("model/test")).toBe(0);
+  });
+
+  test("empty config escalateTo is treated as null", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "persoje-test-"));
+    const tempPath = join(tempDir, "models.json");
+    const store = new ProfileStore(tempPath);
+
+    const router = new Router({
+      enabled: true,
+      mode: "offer",
+      failureThreshold: 1,
+      profiles: store,
+      escalateTo: "", // explicitly empty
+    });
+
+    router.recordFailure("model/test", "validation");
+    const esc = router.shouldEscalate("model/test");
+    expect(esc?.target).toBeNull();
+  });
 });

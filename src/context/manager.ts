@@ -37,6 +37,7 @@ export interface BuildStats {
   cacheBreakpoints: number;
   elidedCount: number;
   prefixStable: boolean;
+  schemaTokens: number;
 }
 
 export class ContextManager {
@@ -72,6 +73,8 @@ export class ContextManager {
   private lastCacheBreakpoints = 0;
   /** SHA-256 fingerprint of the stable prefix content at last build. */
   private lastPrefixHash = "";
+  /** Token cost of serialized tool schemas (set by caller for /status display). */
+  private schemaTokensValue = 0;
 
   constructor(
     private budgetTokens: number,
@@ -295,6 +298,14 @@ export class ContextManager {
   }
 
   /**
+   * Set the schema token cost (called by Agent with ToolRegistry.schemaTokens()).
+   * Schemas sit outside the per-message estimates; this surfaces their cost for /status.
+   */
+  setSchemaTokens(tokens: number): void {
+    this.schemaTokensValue = tokens;
+  }
+
+  /**
    * Get build statistics for /status display.
    */
   buildStats(): BuildStats {
@@ -304,6 +315,7 @@ export class ContextManager {
       cacheBreakpoints: this.lastCacheBreakpoints,
       elidedCount: this.lastElidedCount,
       prefixStable: this.isPrefixStable(),
+      schemaTokens: this.schemaTokensValue,
     };
   }
 
