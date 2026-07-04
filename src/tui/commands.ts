@@ -68,6 +68,10 @@ export function filterCommands(input: string): CommandMeta[] {
 }
 
 export function helpText(): string {
-  const width = Math.max(...COMMANDS.map((c) => (c.name + " " + (c.args ?? "")).length)) + 2;
-  return COMMANDS.map((c) => `  ${(c.name + (c.args ? " " + c.args : "")).padEnd(width)} ${c.desc}`).join("\n");
+  // Multi-line format: command on one line, description on the next.
+  // This prevents Ink from hard-wrapping long description lines.
+  return COMMANDS.map((c) => {
+    const cmd = c.name + (c.args ? " " + c.args : "");
+    return `  ${cmd}\n    ${c.desc}`;
+  }).join("\n");
 }
