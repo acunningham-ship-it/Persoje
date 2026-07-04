@@ -63,7 +63,10 @@ export function Banner({
   const home = process.env.HOME ?? "";
   const shortCwd = home && cwd.startsWith(home) ? "~" + cwd.slice(home.length) : cwd;
   const effortLabel = effort ? ` · effort ${effort}` : "";
-  const titleSuffix = sessionTitle ? ` · ${sessionTitle}` : "";
+
+  // Truncate long lines to fit narrow terminals (70 chars is typical minimum)
+  const truncate = (s: string, max = 65): string => s.length > max ? s.slice(0, max - 1) + "…" : s;
+
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Box
@@ -71,22 +74,17 @@ export function Banner({
         borderColor={t.accent2}
         paddingX={1}
         flexDirection="column"
-        alignSelf="flex-start"
+        width={Math.min(process.stdout.columns || 80, 78)}
       >
         <Text>
           {gradient("◆ persoje", t.gradFrom, t.gradTo)}
           <Text dimColor> v{version}</Text>
-          {sessionTitle ? <Text dimColor> · </Text> : null}
-          {sessionTitle ? <Text color={t.accent}>{sessionTitle}</Text> : null}
         </Text>
-        <Box marginTop={1}>
-          <Text dimColor>model </Text>
-          <Text color={t.accent}>{model}</Text>
-          <Text dimColor> · cwd </Text>
-          <Text color={t.accent}>{shortCwd}</Text>
-          <Text dimColor> · router {routerState}{effortLabel}</Text>
+        <Box marginTop={1} flexDirection="column" width="100%">
+          <Text>{truncate(`model ${model} · router ${routerState}${effortLabel}`)}</Text>
+          <Text dimColor>{truncate(`cwd ${shortCwd}`, 65)}</Text>
         </Box>
-        <Text dimColor>/help · / for menu · esc interrupts · /effort low|mid|high|max</Text>
+        <Text dimColor>/help · / for menu · esc interrupts</Text>
       </Box>
     </Box>
   );

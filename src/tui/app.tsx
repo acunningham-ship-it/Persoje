@@ -1399,7 +1399,7 @@ export function App({
 
       {!pending ? (
         <Box flexDirection="column" marginTop={1}>
-          <Box borderStyle="round" borderColor={busy ? activeTheme.border : activeTheme.accent} paddingX={1}>
+          <Box borderStyle="round" borderColor={busy ? activeTheme.border : activeTheme.accent} paddingX={1} width={process.stdout.columns || 80}>
             <Text color={activeTheme.accent}>{"▸ "}</Text>
             {input ? <Text>{input}</Text> : <Text dimColor>{busy ? "type to queue…" : "task, or / for commands"}</Text>}
             <Text color={activeTheme.accent}>▌</Text>
