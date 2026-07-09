@@ -37,7 +37,9 @@ async function collect(gen: AsyncGenerator<AgentEvent>): Promise<AgentEvent[]> {
   return events;
 }
 
-test("FIX 1: tool budget is enforced exactly (>= not >)", async () => {
+test("dead-iteration limit stops a flailing agent", async () => {
+  // With no tool registry and no approver, every tool call errors.
+  // The stuck/dead limit (default 10) should stop the agent.
   // With mid effort (default), toolBudget = 8.
   // Create a fake client that yields tool calls on every iteration.
   const toolCallEvent = {
@@ -69,8 +71,8 @@ test("FIX 1: tool budget is enforced exactly (>= not >)", async () => {
   const end = events.find((e) => e.type === "turn-end") as Extract<AgentEvent, { type: "turn-end" }> | undefined;
   expect(end).toBeTruthy();
   expect(end?.reason).toBe("max-iterations");
-  // Should stop at exactly 8 iterations (the toolBudget), not 9
-  expect(end?.iterations).toBe(8);
+  // Default stuck limit is 10; expect it to stop exactly there.
+  expect(end?.iterations).toBe(10);
 });
 
 test("FIX 3: system prompt prefix is stable (cached conventions, no per-turn reads)", async () => {

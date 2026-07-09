@@ -4,7 +4,7 @@ import type { CommandMeta } from "./commands.ts";
 import type { TodoItem } from "../tools/types.ts";
 import { theme, getTheme, type Theme } from "./theme.ts";
 
-const FRAMES = ["◆", "◇", "◈", "◇", "◆", "⬡"];
+const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 export function TodoList({ items, activeTheme }: { items: TodoItem[]; activeTheme?: Theme }): React.ReactElement | null {
   const t = activeTheme ?? theme;
@@ -46,13 +46,11 @@ export function Banner({
   version,
   model,
   cwd,
-  sessionTitle,
   activeTheme,
 }: {
   version: string;
   model: string;
   cwd: string;
-  sessionTitle?: string;
   activeTheme?: Theme;
 }): React.ReactElement {
   const t = activeTheme ?? theme;
@@ -61,12 +59,11 @@ export function Banner({
   const truncate = (s: string, max = 65): string => s.length > max ? s.slice(0, max - 1) + "…" : s;
 
   return (
-    <Box flexDirection="column">
+    <Box>
       <Text>
         {gradient("persoje", t.gradFrom, t.gradTo)}
         <Text dimColor> v{version} · {truncate(model)} · {truncate(shortCwd)}</Text>
       </Text>
-      <Text dimColor>/{sessionTitle || "new session"} · /help</Text>
     </Box>
   );
 }
@@ -95,12 +92,6 @@ export function AssistantBlock({ body }: { body: React.ReactNode }): React.React
   );
 }
 
-const fmtTok = (n: number): string =>
-  n >= 1_000_000
-    ? (n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1).replace(/\.0$/, "") + "M"
-    : n >= 1000
-      ? (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1).replace(/\.0$/, "") + "K"
-      : String(n);
 const fmtSecs = (s: number): string => (s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s` : `${s}s`);
 
 export function StatusBar({
@@ -110,14 +101,9 @@ export function StatusBar({
   cost,
   busy,
   turnStart,
-  queued,
-  iterations,
-  planMode,
   trust,
+  planMode,
   activeTheme,
-  cacheHit,
-  toolsThisTurn,
-  schemasTokens,
 }: {
   model: string;
   ctxUsed: number;
@@ -125,14 +111,9 @@ export function StatusBar({
   cost: number;
   busy: boolean;
   turnStart: number;
-  queued: number;
-  iterations?: number;
-  planMode?: boolean;
   trust?: string;
+  planMode?: boolean;
   activeTheme?: Theme;
-  cacheHit?: number;
-  toolsThisTurn?: number;
-  schemasTokens?: number;
 }): React.ReactElement {
   const t = activeTheme ?? theme;
   const [, force] = useState(0);
@@ -144,21 +125,16 @@ export function StatusBar({
 
   const pct = Math.min(100, Math.round((ctxUsed / ctxBudget) * 100));
   const filled = Math.min(10, Math.round(pct / 10));
-  const bar = "█".repeat(filled) + "░".repeat(10 - filled);
+  const bar = "▮".repeat(filled) + "▯".repeat(10 - filled);
   const barColor = pct < 50 ? t.ok : pct < 80 ? t.warn : t.err;
 
   return (
     <Box>
-      <Text dimColor>{model} </Text>
-      <Text color={barColor}>[{bar}]</Text>
+      <Text dimColor>{model}</Text>
+      <Text color={barColor}> {bar}</Text>
       <Text dimColor> {pct}%</Text>
       <Text dimColor> ${cost < 0.01 ? cost.toFixed(5) : cost.toFixed(3)}</Text>
-      {cacheHit && cacheHit > 0 ? <Text dimColor> ⚡{Math.round(cacheHit * 100)}%</Text> : null}
-      {busy ? <Text color={t.accent}> ⏱ {fmtSecs(Math.floor((Date.now() - turnStart) / 1000))}</Text> : null}
-      {iterations != null && iterations > 0 ? <Text dimColor> i{iterations}</Text> : null}
-      {toolsThisTurn != null && toolsThisTurn > 0 ? <Text dimColor> t{toolsThisTurn}</Text> : null}
-      {trust === "yolo" ? <Text color={t.err}> yolo</Text> : trust === "auto-edit" ? <Text color={t.warn}> ae</Text> : null}
-      {planMode ? <Text color={t.warn}> plan</Text> : null}
+      {busy ? <Text color={t.accent}> ⏱{fmtSecs(Math.floor((Date.now() - turnStart) / 1000))}</Text> : null}
     </Box>
   );
 }
@@ -240,14 +216,14 @@ export function ApprovalPrompt({
   return (
     <Box borderStyle="round" borderColor={dangerReason ? theme.err : theme.warn} paddingX={1} flexDirection="column">
       {dangerReason ? (
-        <Text color={theme.err} bold>⚠ DANGER — {dangerReason} (confirmed even in yolo)</Text>
+        <Text color={theme.err} bold>⚠ DANGER — {dangerReason}</Text>
       ) : null}
       <Text bold color={dangerReason ? theme.err : theme.warn}>◆ {name}</Text>
       {body}
       <Box>
         <Text dimColor>
           <Text color={theme.ok}>y</Text> allow · <Text color={theme.err}>n</Text> deny
-          {dangerReason ? "" : <> · <Text color={theme.accent}>a</Text> always allow {name}</>}
+          {dangerReason ? "" : <> · <Text color={theme.accent}>a</Text> always allow</>}
         </Text>
       </Box>
     </Box>

@@ -72,7 +72,6 @@ export async function runSubAgent(
     config: childConfig,
     cwd: parent.cwd,
     repoMap: parent.repoMap,
-    memoryContext: parent.memoryContext,
     skills: parent.skills,
     // No approval hook — subagents are isolated and auto-approved
     // (the parent already decided to delegate).

@@ -3,6 +3,7 @@ import { Box, Static, Text, useApp, useInput } from "ink";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { truncate } from "../tools/truncate.ts";
+import { runCanary, qualityFromScore } from "../router/canary.ts";
 import type { Agent } from "../core/agent.ts";
 import type { SessionStore } from "../session/store.ts";
 import type { ProfileStore } from "../router/router.ts";
@@ -10,7 +11,6 @@ import { OpenRouterClient } from "../models/openrouter.ts";
 import type { PersojeConfig } from "../config/config.ts";
 import { setConfigValue, setActiveProvider, resolveProvider, saveProvider } from "../config/config.ts";
 import { BUILTIN_PROVIDERS, buildProviderMenu, presetHasKey, PRIMER_PROVIDER, type ProviderMenuItem, type ProviderPreset } from "../config/providers.ts";
-import type { LessonLog } from "../memory/lessons.ts";
 import type { FactStore } from "../memory/facts.ts";
 import type { SkillLibrary } from "../memory/skills.ts";
 import { renderMarkdown } from "./markdown.ts";
@@ -70,7 +70,6 @@ export interface AppProps {
   profiles: ProfileStore;
   client: OpenRouterClient;
   config: PersojeConfig;
-  lessons: LessonLog;
   facts: FactStore;
   skills: SkillLibrary;
   mcp?: McpManager;
@@ -155,7 +154,6 @@ export function App({
   profiles,
   client,
   config,
-  lessons,
   facts,
   skills,
   mcp,
@@ -422,28 +420,6 @@ export function App({
     return () => clearInterval(t);
   }, []);
 
-  // Reflexion: turn a failure or a user correction into a real lesson + model
-  // quirk, via the cheap model. Shared by auto-failure handling and /bad.
-  const learnFromTurn = useCallback(
-    async (task: string, error: string, problem: string) => {
-      try {
-        const { lesson, quirk } = await agent.reflect(problem);
-        if (lesson) {
-          lessons.append({ task: task.slice(0, 120), error, lesson, model: agent.model });
-          push({ kind: "info", text: `📝 learned: ${lesson}` });
-        }
-        if (quirk) {
-          profiles.addQuirk(agent.model, quirk);
-          facts.addQuirk(agent.model, quirk);
-          push({ kind: "info", text: `🧠 noted about ${agent.model}: ${quirk}` });
-        }
-      } catch {
-        /* reflection is best-effort */
-      }
-    },
-    [agent, lessons, profiles, facts, push],
-  );
-
   const runTurn = useCallback(
     async (task: string) => {
       setBusy(true);
@@ -555,15 +531,8 @@ export function App({
                 if (used.length) push({ kind: "info", text: `↑ used skill: ${used.join(", ")}` });
                 setTurnsOk((n) => n + 1);
               }
-              // Failed turns get a real reflexion lesson (not telemetry), plus a
-              // model quirk if the model itself misbehaved. `persoje dream` curates later.
               if (ev.reason === "max-iterations" || ev.reason === "error") {
                 setTurnsFailed((n) => n + 1);
-                const problem =
-                  ev.reason === "max-iterations"
-                    ? `ran ${ev.iterations} iterations without finishing the task`
-                    : "the turn errored out";
-                void learnFromTurn(task, ev.reason, problem);
               }
               break;
           }
@@ -575,7 +544,7 @@ export function App({
         abortRef.current = null;
       }
     },
-    [agent, learnFromTurn, push, sessionId, store, skills],
+    [agent, push, sessionId, store, skills],
   );
 
   const handleCommand = useCallback(
@@ -600,13 +569,6 @@ export function App({
             const canary = p.canary ? ` · canary ${p.canary.score}/${p.canary.total}` : "";
             push({ kind: "info", text: `model: ${agent.model} (${p.toolQuality}${canary})` });
           }
-          break;
-        case "/recap":
-          push({ kind: "info", text: "recapping…" });
-          void agent.recap().then(
-            (r) => push({ kind: "info", text: r }),
-            (e) => push({ kind: "error", text: `recap failed: ${(e as Error).message}` }),
-          );
           break;
         case "/retry":
           if (!lastTaskRef.current) {
@@ -692,9 +654,6 @@ export function App({
           });
           break;
         }
-        case "/canary":
-          void maybeCanary(agent.model, true);
-          break;
         case "/cost": {
           const t = agent.accounting.totals();
           push({
@@ -741,7 +700,7 @@ export function App({
               `model      ${agent.model} (${p.toolQuality}${p.canary ? `, canary ${p.canary.score}/${p.canary.total}` : ""})`,
               `session    ${sessionId} · ~${stats.totalTokens} tok (msgs) · ${stats.schemaTokens} tok (schemas) · ${fmtCost(t.cost)}`,
               `context    ${stats.totalMessages} msgs · ${stats.elidedCount} elided · ${stats.cacheBreakpoints} cache pts · prefix ${stats.prefixStable ? "stable ✓" : "dirty"}`,
-              `memory     ${factCount} facts · ${lessons.recent(100).length} lessons · ${skills.list().length} skills`,
+              `memory     ${factCount} facts · ${skills.list().length} skills`,
               `repo-map   ${agent.repoMap ? `~${Math.ceil(agent.repoMap.length / 4)} tok` : "none"}`,
               `config     ~/.config/persoje/config.json · budget ${config.context.budgetTokens} tok`,
               (config as any).planMode ? `plan       📋 ON — will spec before acting` : null,
@@ -816,25 +775,6 @@ export function App({
           setTodos([]);
           push({ kind: "info", text: "history cleared" });
           break;
-        case "/bad": {
-          // strongest learning signal: a human says the last turn was wrong.
-          const why = rest.join(" ").trim();
-          push({ kind: "info", text: "reflecting on what went wrong…" });
-          void learnFromTurn(lastTaskRef.current, "user-flagged", why || "the user said the last response was wrong or unhelpful");
-          break;
-        }
-        case "/good": {
-          // positive signal — record what worked so `dream` can promote it.
-          const note = rest.join(" ").trim();
-          lessons.append({
-            task: lastTaskRef.current.slice(0, 120),
-            error: "success",
-            lesson: `worked${note ? " (" + note + ")" : ""}: ${lastTaskRef.current.slice(0, 100)}`,
-            model: agent.model,
-          });
-          push({ kind: "info", text: "👍 noted — saved as a positive signal for the next dream pass" });
-          break;
-        }
         case "/init":
           void runTurn(
             "Explore this project (ls, glob, read the key files) and then use the write tool to create .persoje/PERSOJE.md: " +
@@ -875,27 +815,13 @@ export function App({
           });
           break;
         }
-        case "/lessons": {
-          const recent = lessons.recent(8);
-          push({
-            kind: "info",
-            text: recent.length
-              ? recent.map((l) => `[${l.model}] ${l.lesson} (${l.task.slice(0, 50)})`).join("\n")
-              : "no lessons recorded yet",
-          });
-          break;
-        }
         case "/stats": {
-          // Is self-improvement actually paying off? Show recall → outcome.
-          const all = lessons.all();
-          const wins = all.filter((l) => l.error === "success").length;
-          const losses = all.length - wins;
           const sk = skills.list().sort((a, b) => b.useCount - a.useCount);
           const usedSkills = sk.filter((s) => s.useCount > 0);
           const factCount = facts.index().split("\n").filter((l) => l.trim().startsWith("- [")).length;
           const lines = [
             `this session   ${turnsOk} ok · ${turnsFailed} failed`,
-            `memory         ${factCount} facts · ${all.length} lessons (${wins} worked / ${losses} from failures)`,
+            `memory         ${factCount} facts`,
             `skills         ${sk.length} total · ${usedSkills.length} have earned their keep`,
           ];
           if (sk.length) {
@@ -903,14 +829,6 @@ export function App({
             for (const s of sk.slice(0, 8)) lines.push(`  ${s.useCount}× /${s.name}${s.useCount === 0 ? " (unused — prunes after 30d)" : ""}`);
           }
           push({ kind: "info", text: lines.join("\n") });
-          break;
-        }
-        case "/quirks": {
-          const p = profiles.get(agent.model);
-          push({
-            kind: "info",
-            text: p.quirks.length ? `${agent.model}:\n` + p.quirks.map((q) => `- ${q}`).join("\n") : `no recorded quirks for ${agent.model}`,
-          });
           break;
         }
         case "/repomap":
@@ -923,18 +841,22 @@ export function App({
           setBusy(true);
           setBusyLabel("dreaming (consolidating memory)");
           setBusyStart(Date.now());
-          void import("../memory/dream.ts")
-            .then(({ runDream }) =>
-              runDream({
-                client,
-                model: config.memory.dreamModel || config.model.compactor || config.model.primary,
-                judgeModel: (config as any).model?.judge || undefined,
-                store,
-                facts,
-                lessons,
-                log: (line) => push({ kind: "info", text: line }),
-              }),
-            )
+          void Promise.all([
+            import("../memory/dream.ts"),
+            import("node:path").then(m => m.join),
+            import("node:os").then(m => m.homedir),
+            import("../memory/lessons.ts").then(m => m.LessonLog),
+          ]).then(([{ runDream }, join, homedir, LessonLog]) =>
+            runDream({
+              client,
+              model: config.memory.dreamModel || config.model.compactor || config.model.primary,
+              judgeModel: (config as any).model?.judge || undefined,
+              store,
+              facts,
+              lessons: new LessonLog(join(homedir(), ".config", "persoje", "memory", "lessons.jsonl")),
+              log: (line) => push({ kind: "info", text: line }),
+            }),
+          )
             .then((r) => push({ kind: "info", text: `dream complete: ${r.factsAdded} new facts, ${r.lessonsCompacted} lessons kept` }))
             .catch((e) => push({ kind: "error", text: `dream failed: ${(e as Error).message}` }))
             .finally(() => setBusy(false));
@@ -1132,7 +1054,7 @@ export function App({
         }
       }
     },
-    [agent, client, config, cwd, exit, facts, lessons, learnFromTurn, maybeCanary, profiles, push, router, runTurn, sessionId, skills, store, mcp],
+    [agent, client, config, cwd, exit, facts, maybeCanary, profiles, push, runTurn, sessionId, skills, store, mcp],
   );
 
   // Queued messages run as soon as the agent frees up.
@@ -1351,7 +1273,6 @@ export function App({
                 version={VERSION}
                 model={agent.model}
                 cwd={cwd}
-                sessionTitle={sessionTitle || undefined}
                 activeTheme={activeTheme}
               />
             );
@@ -1511,11 +1432,6 @@ export function App({
               cost={statusCost}
               busy={busy}
               turnStart={busyStart}
-              queued={queue.length}
-              iterations={turnIterations}
-              toolsThisTurn={turnTools}
-              cacheHit={agent.context.cacheHitRatio}
-              schemasTokens={agent.context.buildStats().schemaTokens}
               planMode={(config as any).planMode ?? false}
               trust={trust}
               activeTheme={activeTheme}

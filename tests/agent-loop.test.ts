@@ -401,25 +401,6 @@ test("routine bash still runs without approver (one-shot)", async () => {
   expect(result.result).toContain("hi");
 });
 
-test("reflect() turns a failure into a lesson + quirk via the model", async () => {
-  const client = fakeClient([
-    [{ type: "text", delta: '{"lesson": "read the file before editing", "quirk": "model loops on ambiguous edits"}' }, usage],
-  ]);
-  const agent = new Agent({ client, tools: new ToolRegistry(), config: makeConfig(), cwd: "/tmp" });
-  agent.context.addUser("edit the thing");
-  const { lesson, quirk } = await agent.reflect("ran out of iterations");
-  expect(lesson).toBe("read the file before editing");
-  expect(quirk).toContain("loops");
-});
-
-test("reflect() tolerates non-JSON output", async () => {
-  const client = fakeClient([[{ type: "text", delta: "just be more careful next time" }, usage]]);
-  const agent = new Agent({ client, tools: new ToolRegistry(), config: makeConfig(), cwd: "/tmp" });
-  const { lesson, quirk } = await agent.reflect("x");
-  expect(lesson).toContain("careful");
-  expect(quirk).toBe("");
-});
-
 test("stuckLimit stops a pure-error loop without capping productive work", async () => {
   const registry = new ToolRegistry();
   registry.register({

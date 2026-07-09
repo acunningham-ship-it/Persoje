@@ -15,13 +15,12 @@ import { TranscriptWriter } from "./context/transcript.ts";
 import { setGoalTool, transcriptTool } from "./tools/goal-tools.ts";
 import { updateTodosTool } from "./tools/todo-tools.ts";
 import { buildRepoMap } from "./context/repo-map.ts";
+import { ProfileStore } from "./router/router.ts";
 import { FactStore } from "./memory/facts.ts";
-import { LessonLog } from "./memory/lessons.ts";
 import { SkillLibrary } from "./memory/skills.ts";
 import { makeTaskTool } from "./agents/subagent.ts";
 import { makeAddSkillTool, makeInvokeSkillTool, makeListSkillsTool } from "./tools/skill-tools.ts";
 import { McpManager } from "./mcp/client.ts";
-import { loadPersonality } from "./core/personality.ts";
 
 const VERSION = "0.4.0";
 
@@ -259,6 +258,7 @@ async function main(): Promise<void> {
     const provider = resolveProvider(config);
     const client = new OpenRouterClient(provider.apiKey, provider.baseUrl, provider.extraHeaders);
     const { runDream } = await import("./memory/dream.ts");
+    const { LessonLog } = await import("./memory/lessons.ts");
     const result = await runDream({
       client,
       model: config.memory.dreamModel || config.model.compactor || config.model.primary,
@@ -294,34 +294,23 @@ async function main(): Promise<void> {
     .text()
     .catch(() => "");
 
-  // Memory: bounded index + lessons at session start; skills injected per turn.
+  // Memory: bounded index at session start; skills injected per turn.
   const facts = new FactStore(join(GLOBAL_CONFIG_DIR, "memory"));
-  const lessons = new LessonLog(join(GLOBAL_CONFIG_DIR, "memory", "lessons.jsonl"));
   const skills = new SkillLibrary(join(GLOBAL_CONFIG_DIR, "skills"));
-  // Auto-prune unused skills on startup
-  const pruned = skills.prune();
-  if (pruned.length > 0 && !printMode) console.log(`Pruned ${pruned.length} unused skill(s): ${pruned.join(", ")}`);
+  // Auto-prune unused skills only if the library is bloated (avoids pruning on every boot with new skills).
+  if (skills.list().length > 20) {
+    const pruned = skills.prune();
+    if (pruned.length > 0 && !printMode) console.log(`Pruned ${pruned.length} unused skill(s): ${pruned.join(", ")}`);
+  }
 
-  // Personality: loaded from disk, controls agent behavior
-  const personality = loadPersonality();
-
-  const [repoMap, projectGuide] = await Promise.all([repoMapP, projectGuideP]);
+  const [repoMap] = await Promise.all([repoMapP, projectGuideP]);
   await mcpReadyP; // MCP tools must be connected before we build the registry
-  const memoryContext = config.memory.enabled
-    ? [
-        projectGuide,
-        facts.loadForSession(Math.floor(config.memory.budgetTokens * 0.6)),
-        lessons.loadForSession(Math.floor(config.memory.budgetTokens * 0.4)),
-      ]
-        .filter(Boolean)
-        .join("\n")
-    : projectGuide;
 
   const tools = buildRegistry(skills, mcp);
-  const agent = new Agent({ client, tools, config, cwd, repoMap, memoryContext, skills, personality });
+  const agent = new Agent({ client, tools, config, cwd, repoMap, skills });
   // The task tool lets the main model delegate to isolated sub-agents.
-  // Pass full AgentDeps so subagents inherit repo-map, memory, skills.
-  tools.register(makeTaskTool({ client, tools, config, cwd, repoMap, memoryContext, skills }));
+  // Pass full AgentDeps so subagents inherit repo-map, skills.
+  tools.register(makeTaskTool({ client, tools, config, cwd, repoMap, skills }));
 
   // Headless mode: `persoje headless <sessionId>` — the autonomous daemon runs
   // this. It resumes the session + goal and works toward the goal turn-by-turn
@@ -411,7 +400,7 @@ async function main(): Promise<void> {
     const React = await import("react");
     const { App } = await import("./tui/app.tsx");
     const instance = render(
-      React.createElement(App, { agent, store, sessionId, cwd, profiles, client, config, lessons, facts, skills, mcp, modelWindows }),
+      React.createElement(App, { agent, store, sessionId, cwd, profiles, client, config, facts, skills, mcp, modelWindows }),
       { exitOnCtrlC: true },
     );
 

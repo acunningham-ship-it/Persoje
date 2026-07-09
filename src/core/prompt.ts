@@ -1,5 +1,3 @@
-import type { Personality } from "./personality.ts";
-import { personalityPrompt, DEFAULT_PERSONALITY } from "./personality.ts";
 import type { TodoItem } from "../tools/types.ts";
 import { renderTodos } from "../tools/todo-tools.ts";
 import { existsSync } from "fs";
@@ -67,9 +65,6 @@ export function buildPinsSection(goal: string, todos: TodoItem[]): string {
  */
 export function buildSystemPrompt(
   cwd: string,
-  _repoMap = "",
-  memory = "",
-  _personality?: Personality,
   skillCatalog?: string,
   conventions = "",
   quirks: string[] = [],
@@ -89,5 +84,5 @@ export function buildSystemPrompt(
 
 Read before you edit. Edits use exact search/replace. Prefer narrow reads and grep.
 Verify after editing. Don't guess — web_search then web_fetch. When done, stop.
-Be concise. Keep working until fully done. Debug and retry on failure.${quirksSection}${projectConventionsSection}${memory ? `\n\nMemory:\n${memory}` : ""}${skillSection}`;
+Be concise. Keep working until fully done. Debug and retry on failure.${quirksSection}${projectConventionsSection}${skillSection}`;
 }

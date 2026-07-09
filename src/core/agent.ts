@@ -1,7 +1,6 @@
 import type { AgentEvent } from "./events.ts";
 import { Accounting } from "./tokens.ts";
 import { buildSystemPrompt, buildRepoMapSection, buildPinsSection, findProjectConventions } from "./prompt.ts";
-import { loadPersonality, type Personality } from "./personality.ts";
 import { ContextManager } from "../context/manager.ts";
 import { OpenRouterClient, type ToolCallRequest, type ChatMessage } from "../models/openrouter.ts";
 import { ToolError, type ToolContext, type ToolRegistry } from "../tools/types.ts";
@@ -36,12 +35,8 @@ export interface AgentDeps {
   cwd: string;
   /** Pre-built repo-map appended to the system prompt (empty = none). */
   repoMap?: string;
-  /** Session-start memory block (fact index + recent lessons), bounded by config. */
-  memoryContext?: string;
   /** Skill library — relevant skills are injected per user turn, not per session. */
   skills?: { injectFor(taskText: string, maxTokens: number): string; list(): Array<{ name: string; description: string }>; summaryForPrompt(): string };
-  /** Personality config — loaded from disk, controls tone/verbosity/etc. */
-  personality?: Personality;
   /**
    * Approval hook for mutating tools (bash/write/edit). Return false to deny.
    * Absent hook = auto-approve (plain REPL / one-shot mode).
@@ -168,80 +163,6 @@ export class Agent {
     });
   }
 
-  /**
-   * Reflexion: turn a failure (or a user correction) into a concrete, reusable
-   * lesson + an optional note about the model's own misbehavior. One cheap-model
-   * call over the recent transcript. This is what makes self-improvement learn
-   * something real instead of logging "ended with max-iterations".
-   */
-  async reflect(problem: string): Promise<{ lesson: string; quirk: string }> {
-    const { client, config } = this.deps;
-    const transcript = this.context
-      .history()
-      .slice(-14)
-      .map((m) => {
-        if (m.role === "tool") return `[tool result] ${(m.content ?? "").slice(0, 200)}`;
-        if (m.role === "assistant" && "tool_calls" in m && m.tool_calls?.length)
-          return `assistant: ${m.content}\n[called: ${m.tool_calls.map((c) => c.function.name).join(", ")}]`;
-        return `${m.role}: ${(m.content ?? "").slice(0, 400)}`;
-      })
-      .join("\n");
-
-    let raw = "";
-    const stream = client.stream({
-      model: config.model.compactor || config.model.primary,
-      messages: [
-        {
-          role: "user",
-          content:
-            `A coding-agent turn went wrong. Problem: ${problem}\n\nRecent transcript:\n${transcript}\n\n` +
-            `Reply with ONLY JSON: {"lesson": "one concrete, actionable rule to avoid this next time — imperative, <=30 words", ` +
-            `"quirk": "if the MODEL itself misbehaved (malformed tool calls, looping, ignoring instructions), one short note about it; otherwise empty string"}`,
-        },
-      ],
-      maxTokens: 250,
-      temperature: 0,
-    });
-    for await (const ev of stream) if (ev.type === "text") raw += ev.delta;
-
-    try {
-      const m = raw.match(/\{[\s\S]*\}/);
-      const obj = JSON.parse(m ? m[0] : raw) as { lesson?: string; quirk?: string };
-      return { lesson: String(obj.lesson ?? "").trim(), quirk: String(obj.quirk ?? "").trim() };
-    } catch {
-      return { lesson: raw.trim().slice(0, 200), quirk: "" };
-    }
-  }
-
-  /** Short "where are we" summary of the session so far (the /recap command). */
-  async recap(): Promise<string> {
-    const { client, config } = this.deps;
-    const transcript = this.context
-      .history()
-      .slice(-20)
-      .map((m) => {
-        if (m.role === "tool") return `[tool] ${(m.content ?? "").slice(0, 150)}`;
-        return `${m.role}: ${(m.content ?? "").slice(0, 400)}`;
-      })
-      .join("\n");
-    if (!transcript.trim()) return "Nothing to recap yet.";
-    let out = "";
-    const stream = client.stream({
-      model: config.model.compactor || config.model.primary,
-      messages: [
-        {
-          role: "user",
-          content:
-            `Recap this coding session for someone rejoining it. 4-6 short bullets: what's been done, the current state, and what's next. No preamble.\n\n${transcript}`,
-        },
-      ],
-      maxTokens: 400,
-      temperature: 0,
-    });
-    for await (const ev of stream) if (ev.type === "text") out += ev.delta;
-    return out.trim() || "(recap unavailable)";
-  }
-
   /** Install/replace the approval hook after construction (the TUI does this). */
   setApprover(approve: AgentDeps["approve"]): void {
     this.deps.approve = approve;
@@ -353,12 +274,11 @@ export class Agent {
         let text = "";
         let toolCalls: ToolCallRequest[] = [];
 
-        const personality = this.deps.personality ?? loadPersonality();
         const skillCatalog = this.deps.skills?.summaryForPrompt() ?? "";
 
-        // seg1 (byte-stable base): base rules + quirks + conventions + personality + memory + skills.
+        // seg1 (byte-stable base): base rules + quirks + conventions + skills.
         // NOT in seg1: repo-map (→ seg3) and goal/todos (→ seg5 pins) — both volatile, kept out so seg1's hash stays stable.
-        const seg1 = buildSystemPrompt(cwd, "", this.deps.memoryContext ?? "", personality, skillCatalog, this.cachedConventions, this.cachedQuirks);
+        const seg1 = buildSystemPrompt(cwd, skillCatalog, this.cachedConventions, this.cachedQuirks);
         const seg3RepoMap = buildRepoMapSection(this.deps.repoMap ?? "");
         const pinsSection = buildPinsSection(this.context.goal, this.context.todos);
 

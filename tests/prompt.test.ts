@@ -4,15 +4,14 @@ import { mkdtemp, writeFile, mkdir, rm } from "fs/promises";
 import { join } from "path";
 
 describe("buildSystemPrompt (seg1 — stable base)", () => {
-  test("includes base rules and effort prompt", () => {
-    const p = buildSystemPrompt("/repo", "", "", "mid");
+  test("includes base rules", () => {
+    const p = buildSystemPrompt("/repo");
     expect(p).toContain("You are Persoje");
     expect(p).toContain("Read before you edit");
-    expect(p).toContain("Effort: MID");
   });
 
   test("does NOT include goal or todos (those are in buildPinsSection)", () => {
-    const p = buildSystemPrompt("/repo", "", "", "mid");
+    const p = buildSystemPrompt("/repo");
     expect(p).not.toContain("SESSION GOAL");
     expect(p).not.toContain("WORKING PLAN");
   });
@@ -37,23 +36,15 @@ describe("buildSystemPrompt auto-load AGENTS.md", () => {
 
     // Agent loads conventions once at init via findProjectConventions and passes
     // them into buildSystemPrompt; replicate that wiring here.
-    const p = buildSystemPrompt(tempDir, "", "", "mid", undefined, undefined, findProjectConventions(tempDir));
+    const p = buildSystemPrompt(tempDir, undefined, findProjectConventions(tempDir));
     expect(p).toContain(agentsContent);
-  });
-
-  test("includes get_context boot instruction when AGENTS.md is loaded", async () => {
-    const agentsContent = "# Project Config";
-    await writeFile(join(tempDir, "AGENTS.md"), agentsContent);
-
-    const p = buildSystemPrompt(tempDir, "", "", "mid", undefined, undefined, findProjectConventions(tempDir));
-    expect(p).toContain("get_context");
   });
 
   test("falls back to CLAUDE.md if AGENTS.md does not exist", async () => {
     const claudeContent = "# Claude Configuration\nRules for this project";
     await writeFile(join(tempDir, "CLAUDE.md"), claudeContent);
 
-    const p = buildSystemPrompt(tempDir, "", "", "mid", undefined, undefined, findProjectConventions(tempDir));
+    const p = buildSystemPrompt(tempDir, undefined, findProjectConventions(tempDir));
     expect(p).toContain(claudeContent);
   });
 
@@ -66,7 +57,7 @@ describe("buildSystemPrompt auto-load AGENTS.md", () => {
       const agentsContent = "# Parent AGENTS\nConfig from parent dir";
       await writeFile(join(parentDir, "AGENTS.md"), agentsContent);
 
-      const p = buildSystemPrompt(childDir, "", "", "mid", undefined, undefined, findProjectConventions(childDir));
+      const p = buildSystemPrompt(childDir, undefined, findProjectConventions(childDir));
       expect(p).toContain(agentsContent);
     } finally {
       await rm(parentDir, { recursive: true, force: true });
@@ -85,7 +76,7 @@ describe("buildSystemPrompt auto-load AGENTS.md", () => {
     await writeFile(join(tempDir, "AGENTS.md"), agentsContent);
     await writeFile(join(tempDir, "CLAUDE.md"), claudeContent);
 
-    const p = buildSystemPrompt(tempDir, "", "", "mid", undefined, undefined, findProjectConventions(tempDir));
+    const p = buildSystemPrompt(tempDir, undefined, findProjectConventions(tempDir));
     expect(p).toContain(agentsContent);
     expect(p).not.toContain(claudeContent);
   });
@@ -93,15 +84,15 @@ describe("buildSystemPrompt auto-load AGENTS.md", () => {
 
 describe("buildSystemPrompt quirks section", () => {
   test("renders quirks when provided", () => {
-    const p = buildSystemPrompt("/repo", "", "", "mid", undefined, undefined, "", ["malforms JSON", "loops on iteration"]);
-    expect(p).toContain("Known quirks of this model");
+    const p = buildSystemPrompt("/repo", undefined, "", ["malforms JSON", "loops on iteration"]);
+    expect(p).toContain("Model quirks");
     expect(p).toContain("• malforms JSON");
     expect(p).toContain("• loops on iteration");
   });
 
   test("caps quirks to top 3", () => {
     const manyQuirks = Array.from({ length: 10 }, (_, i) => `quirk-${i}`);
-    const p = buildSystemPrompt("/repo", "", "", "mid", undefined, undefined, "", manyQuirks);
+    const p = buildSystemPrompt("/repo", undefined, "", manyQuirks);
     expect(p).toContain("quirk-0");
     expect(p).toContain("quirk-1");
     expect(p).toContain("quirk-2");
@@ -109,8 +100,8 @@ describe("buildSystemPrompt quirks section", () => {
   });
 
   test("omits quirks section when empty", () => {
-    const p = buildSystemPrompt("/repo", "", "", "mid", undefined, undefined, "", []);
-    expect(p).not.toContain("Known quirks of this model");
+    const p = buildSystemPrompt("/repo", undefined, "", []);
+    expect(p).not.toContain("Model quirks");
   });
 });
 
