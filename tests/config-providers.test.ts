@@ -39,7 +39,7 @@ describe("multi-provider config", () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
       context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
-      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0 },
+      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
       effort: { level: "mid" },
       toolResultCaps: {},
@@ -66,7 +66,7 @@ describe("multi-provider config", () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
       context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
-      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0 },
+      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
       effort: { level: "mid" },
       toolResultCaps: {},
@@ -91,7 +91,7 @@ describe("multi-provider config", () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
       context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
-      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0 },
+      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
       effort: { level: "mid" },
       toolResultCaps: {},
@@ -115,7 +115,7 @@ describe("multi-provider config", () => {
     const config: PersojeConfig = {
       model: { primary: "deepseek/deepseek-chat", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
       context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
-      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0 },
+      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
       effort: { level: "mid" },
       toolResultCaps: {},
@@ -146,7 +146,7 @@ describe("multi-provider config", () => {
     const config: PersojeConfig = {
       model: { primary: "deepseek/deepseek-chat", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
       context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
-      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0 },
+      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
       effort: { level: "mid" },
       toolResultCaps: {},
@@ -174,7 +174,7 @@ describe("multi-provider config", () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
       context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
-      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0 },
+      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
       effort: { level: "mid" },
       toolResultCaps: {},
@@ -201,7 +201,7 @@ describe("multi-provider config", () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
       context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
-      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0 },
+      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
       effort: { level: "mid" },
       toolResultCaps: {},
@@ -228,7 +228,7 @@ describe("multi-provider config", () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
       context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
-      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0 },
+      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
       effort: { level: "mid" },
       toolResultCaps: {},
@@ -247,7 +247,7 @@ describe("multi-provider config", () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
       context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
-      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0 },
+      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
       effort: { level: "mid" },
       toolResultCaps: {},
@@ -272,7 +272,7 @@ describe("multi-provider config", () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
       context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
-      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0 },
+      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
       effort: { level: "mid" },
       toolResultCaps: {},
@@ -321,7 +321,7 @@ describe("multi-provider config", () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
       context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
-      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0 },
+      loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
       effort: { level: "mid" },
       toolResultCaps: {},

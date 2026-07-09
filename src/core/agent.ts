@@ -17,6 +17,7 @@ import { resolve, join } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { FactStore } from "../memory/facts.ts";
+import { getMonitorManager, type MonitorTick } from "./monitors.ts";
 
 /**
  * Tools with no side effects and no ordering constraints — safe to run
@@ -247,6 +248,27 @@ export class Agent {
           }
         }
         iterations++;
+
+        // Background monitor check: run any due monitors silently between iterations.
+        // Fired alerts (non-zero exit or stderr) are injected into context as system
+        // messages so the model can see and react to them in the active session.
+        if (config.loop.enableMonitors ?? true) {
+          try {
+            const ticks = await getMonitorManager().checkAll();
+            for (const tick of ticks) {
+              const alert = [
+                `[MONITOR: ${tick.name}]`,
+                tick.exitCode !== 0 ? `  exit code: ${tick.exitCode}` : "",
+                tick.error ? `  stderr: ${tick.error.trim()}` : "",
+                tick.output ? `  output: ${tick.output.trim()}` : "",
+              ].filter(Boolean).join("\n");
+              this.context.addSystem(alert);
+              yield { type: "monitor-event", name: tick.name, output: tick.output, error: tick.error, exitCode: tick.exitCode };
+            }
+          } catch {
+            // Swallow monitor errors — they shouldn't crash the agent loop
+          }
+        }
 
         // Primer mode detection (cached after first turn): determines whether to use seg1/seg3/pins
         // layout or bundle everything into one system prompt.

@@ -20,6 +20,7 @@ import { FactStore } from "./memory/facts.ts";
 import { SkillLibrary } from "./memory/skills.ts";
 import { makeTaskTool } from "./agents/subagent.ts";
 import { makeAddSkillTool, makeInvokeSkillTool, makeListSkillsTool } from "./tools/skill-tools.ts";
+import { monitorTool } from "./tools/monitor-tools.ts";
 import { McpManager } from "./mcp/client.ts";
 
 const VERSION = "0.4.0";
@@ -35,6 +36,8 @@ function buildRegistry(skills: SkillLibrary, mcp?: McpManager): ToolRegistry {
   // the first one); invoke/list only matter once skills exist — gate them to
   // save tool-schema tokens on every call when the library is empty.
   registry.register(makeAddSkillTool(skills));
+  // Monitor management — background watchers that fire between iterations
+  registry.register(monitorTool);
   if (skills.list().length > 0) {
     registry.register(makeInvokeSkillTool(skills));
     registry.register(makeListSkillsTool(skills));
@@ -106,6 +109,13 @@ async function runTurn(agent: Agent, input: string): Promise<void> {
             process.stdout.write(chalk.yellow(`\n[stopped: hit ${ev.iterations} iterations]\n`));
           if (ev.reason === "cancelled") process.stdout.write(chalk.yellow("[turn cancelled]\n"));
           break;
+        case "monitor-event":
+          if (ev.exitCode !== 0 || ev.error) {
+            process.stdout.write(chalk.yellow(`  ⚠ [monitor:${ev.name}] exit ${ev.exitCode}${ev.error ? ` ${ev.error.trim()}` : ""}\n`));
+          } else {
+            process.stdout.write(chalk.dim(`  ◦ [monitor:${ev.name}] fired\n`));
+          }
+          break;
       }
     }
   } finally {
@@ -148,6 +158,10 @@ async function runHeadless(agent: Agent, maxRounds = 25): Promise<void> {
         finalText = ev.text;
       } else if (ev.type === "error") {
         log(`  error: ${ev.message}`);
+      } else if (ev.type === "monitor-event") {
+        if (ev.exitCode !== 0 || ev.error) {
+          log(`  ⚠ [monitor:${ev.name}] exit ${ev.exitCode}${ev.error ? ` ${ev.error.trim()}` : ""}`);
+        }
       }
     }
     log(`round ${round}: ${finalText.slice(0, 200)}`);
@@ -183,6 +197,8 @@ async function runPrint(agent: Agent, input: string, json: boolean): Promise<voi
     } else if (ev.type === "error") {
       errored = true;
       process.stderr.write(chalk.red(`error: ${ev.message}\n`));
+    } else if (ev.type === "monitor-event" && (ev.exitCode !== 0 || ev.error)) {
+      process.stderr.write(chalk.yellow(`  ⚠ [monitor:${ev.name}] exit ${ev.exitCode}${ev.error ? ` ${ev.error.trim()}` : ""}\n`));
     }
   }
   const t = agent.accounting.totals();

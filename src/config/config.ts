@@ -48,6 +48,8 @@ const ConfigSchema = z.object({
       /** Hard session cost ceiling in USD — the turn halts once accumulated cost
        *  reaches it (the safety net for autonomous/long runs). 0 = unlimited. */
       maxCostUsd: z.number().default(0),
+      /** Enable background monitors that fire between iterations (file watchers, periodic checks, etc.). */
+      enableMonitors: z.boolean().default(true),
     })
     .prefault({}),
   retry: z

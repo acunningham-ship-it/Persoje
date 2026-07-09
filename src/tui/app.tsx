@@ -472,6 +472,13 @@ export function App({
             case "router":
               push({ kind: "info", text: `⇄ ${ev.message}${ev.target ? ` — switch with /model ${ev.target}` : ""}` });
               break;
+            case "monitor-event":
+              if (ev.exitCode !== 0 || ev.error) {
+                push({ kind: "error", text: `⚠ [monitor:${ev.name}] exit ${ev.exitCode}${ev.error ? ` ${ev.error.trim()}` : ""}` });
+              } else {
+                push({ kind: "info", text: `◦ [monitor:${ev.name}] fired` });
+              }
+              break;
             case "compaction":
               push({ kind: "info", text: `⇣ compacted history: ~${ev.beforeTokens} → ~${ev.afterTokens} tok` });
               break;
