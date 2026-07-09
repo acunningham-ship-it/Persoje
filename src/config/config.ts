@@ -24,8 +24,8 @@ const ConfigSchema = z.object({
       budgetTokens: z.number().default(40_000),
       /** Compact when estimated history exceeds this fraction of the budget. */
       compactionThreshold: z.number().min(0.3).max(0.95).default(0.65),
-      /** Turns kept at full fidelity during compaction. Set to 1-2 for aggressive context saving. */
-      keepFullTurns: z.number().default(2),
+      /** Turns kept at full fidelity during compaction. */
+      keepFullTurns: z.number().default(10),
       /** Repo-map token budget; 0 disables. */
       repoMapTokens: z.number().default(800),
       /** Attach a cache_control breakpoint to the system prompt (providers without caching ignore it). */
