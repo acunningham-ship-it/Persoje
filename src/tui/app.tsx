@@ -3,7 +3,6 @@ import { Box, Static, Text, useApp, useInput } from "ink";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { truncate } from "../tools/truncate.ts";
-import { runCanary, qualityFromScore } from "../router/canary.ts";
 import type { Agent } from "../core/agent.ts";
 import type { SessionStore } from "../session/store.ts";
 import type { ProfileStore } from "../router/router.ts";
@@ -179,8 +178,6 @@ export function App({
   const [turnIterations, setTurnIterations] = useState(0);
   const [turnTools, setTurnTools] = useState(0);
   const [todos, setTodos] = useState<import("../tools/types.ts").TodoItem[]>([]);
-  const [turnsOk, setTurnsOk] = useState(0);
-  const [turnsFailed, setTurnsFailed] = useState(0);
   const [pickerSessions, setPickerSessions] = useState<import("../session/store.ts").SessionMeta[]>([]);
   const [pickerSelected, setPickerSelected] = useState(0);
   // /provider interactive flow: pick from a menu, then (if needed) type a URL or key.
@@ -377,37 +374,6 @@ export function App({
     });
   }, [agent]);
 
-  // Canary: first use of an unknown/variable model gets a 3-prompt smoke test;
-  // the verdict persists to ~/.config/persoje/models.json and tunes strictness.
-  const canaried = useRef(new Set<string>());
-  const maybeCanary = useCallback(
-    async (modelId: string, force = false) => {
-      if (!force && canaried.current.has(modelId)) return;
-      const profile = profiles.get(modelId);
-      if (!force && (profile.canary || profile.toolQuality === "excellent" || profile.toolQuality === "good")) return;
-      canaried.current.add(modelId);
-      push({ kind: "info", text: `testing ${modelId} (3-prompt canary)…` });
-      try {
-        const result = await runCanary(client, modelId);
-        const quality = qualityFromScore(result.score);
-        profiles.upsert({
-          ...profile,
-          toolQuality: quality,
-          canary: { score: result.score, total: result.total, testedAt: Date.now(), notes: result.notes },
-        });
-        const notes = result.notes.length ? ` (${result.notes.join("; ")})` : "";
-        push({ kind: "info", text: `canary: ${result.score}/${result.total} → ${quality}${notes}` });
-      } catch (e) {
-        push({ kind: "info", text: `canary failed: ${(e as Error).message}` });
-      }
-    },
-    [client, config, profiles, push],
-  );
-  useEffect(() => {
-    void maybeCanary(agent.model);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // Batch streaming deltas: flush at 80ms so Ink isn't re-rendering per token.
   useEffect(() => {
     const t = setInterval(() => {
@@ -525,14 +491,8 @@ export function App({
               setTurnIterations(0);
               setTurnTools(0);
               if (ev.reason === "done") {
-                // Success: confirm any recalled skills as actually useful (ties
-                // useCount/pruning to outcome) and count it toward effectiveness.
                 const used = skills.confirmInjectedUsed();
                 if (used.length) push({ kind: "info", text: `↑ used skill: ${used.join(", ")}` });
-                setTurnsOk((n) => n + 1);
-              }
-              if (ev.reason === "max-iterations" || ev.reason === "error") {
-                setTurnsFailed((n) => n + 1);
               }
               break;
           }
@@ -562,12 +522,24 @@ export function App({
           if (rest[0]) {
             agent.model = rest[0];
             push({ kind: "info", text: `model → ${rest[0]}` });
-            void maybeCanary(rest[0]);
           } else {
-            // Show current model info in status
-            const p = profiles.get(agent.model);
-            const canary = p.canary ? ` · canary ${p.canary.score}/${p.canary.total}` : "";
-            push({ kind: "info", text: `model: ${agent.model} (${p.toolQuality}${canary})` });
+            push({ kind: "info", text: "fetching model catalog…" });
+            void client.catalog().then(
+              (cat) => {
+                const items = cat
+                  .filter((m) => m.tools)
+                  .sort((a, b) => a.inPrice - b.inPrice)
+                  .map((m) => ({
+                    label: `${m.id}  ${m.inPrice === 0 ? "free" : "$" + m.inPrice.toFixed(2) + "/M"}  ${Math.round(m.context / 1000)}k ctx`,
+                    value: m.id,
+                  }));
+                openMenu("switch model", items, (id) => {
+                  agent.model = id;
+                  push({ kind: "info", text: `model → ${id}` });
+                });
+              },
+              () => push({ kind: "error", text: "couldn't fetch the model catalog" }),
+            );
           }
           break;
         case "/retry":
@@ -807,11 +779,18 @@ export function App({
         }
         case "/skills": {
           const list = skills.list();
-          push({
-            kind: "info",
-            text: list.length
-              ? list.map((s) => `${s.name} — ${s.description}`).join("\n")
-              : "no skills yet — drop markdown files in ~/.config/persoje/skills/ (first line: # name: description)",
+          if (list.length === 0) {
+            push({
+              kind: "info",
+              text: "no skills yet — drop markdown files in ~/.config/persoje/skills/ (first line: # name: description)",
+            });
+            break;
+          }
+          openMenu("skills", list.map((s) => ({
+            label: `${s.name}  ${s.useCount}×  ${s.description}`,
+            value: s.name,
+          })), (name) => {
+            void runTurn(`[Following skill: ${name}]\n${skills.load(name)!.content}`);
           });
           break;
         }
@@ -820,7 +799,6 @@ export function App({
           const usedSkills = sk.filter((s) => s.useCount > 0);
           const factCount = facts.index().split("\n").filter((l) => l.trim().startsWith("- [")).length;
           const lines = [
-            `this session   ${turnsOk} ok · ${turnsFailed} failed`,
             `memory         ${factCount} facts`,
             `skills         ${sk.length} total · ${usedSkills.length} have earned their keep`,
           ];
@@ -1054,7 +1032,7 @@ export function App({
         }
       }
     },
-    [agent, client, config, cwd, exit, facts, maybeCanary, profiles, push, runTurn, sessionId, skills, store, mcp],
+    [agent, client, config, cwd, exit, facts, profiles, push, runTurn, sessionId, skills, store, mcp],
   );
 
   // Queued messages run as soon as the agent frees up.
@@ -1286,23 +1264,27 @@ export function App({
                 </Box>
               );
             case "assistant":
-              return <AssistantBlock key={item.id} body={<Text>{renderMarkdown(item.text)}</Text>} />;
+              return (
+                <Box key={item.id} borderStyle="round" borderColor={activeTheme.border} paddingX={1}>
+                  <AssistantBlock body={<Text>{renderMarkdown(item.text)}</Text>} />
+                </Box>
+              );
             case "tool":
               // Dense scannable row: icon · name(args) · result
               return item.isError ? (
-                <Box key={item.id} flexDirection="column">
-                  <Text>
+                <Box key={item.id} flexDirection="column" borderStyle="round" borderColor={activeTheme.err} paddingX={1}>
+                  <Box>
                     <Text color={activeTheme.err}>◆ </Text>
-                    <Text bold>{item.name}</Text>
+                    <Text bold color={activeTheme.err}>{item.name}</Text>
                     <Text dimColor>({item.argsPreview})</Text>
-                  </Text>
-                  <Text color={activeTheme.err}>  {item.note}</Text>
+                    <Text dimColor> {item.note}</Text>
+                  </Box>
                 </Box>
               ) : (
-                <Box key={item.id} flexDirection="column">
+                <Box key={item.id} flexDirection="column" borderStyle="round" borderColor={activeTheme.border} paddingX={1}>
                   <Box>
                     <Text color={activeTheme.accent}>{TOOL_ICON[item.name] ?? "▸"} </Text>
-                    <Text>{item.name}</Text>
+                    <Text bold color={activeTheme.accent}>{item.name}</Text>
                     <Text dimColor>({item.argsPreview}) </Text>
                     <Text dimColor>{item.note}</Text>
                   </Box>
