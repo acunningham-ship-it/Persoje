@@ -273,3 +273,18 @@ export async function setActiveProvider(providerName: string): Promise<string> {
   await Bun.write(GLOBAL_CONFIG_PATH, JSON.stringify({ ...existing, activeProvider: providerName }, null, 2) + "\n");
   return GLOBAL_CONFIG_PATH;
 }
+
+/**
+ * Upsert one entry into `providers`, preserving every other key. Backs the
+ * `/provider` menu when it materializes a built-in preset or a custom URL so
+ * the provider (and its key/URL) survives across sessions.
+ */
+export async function saveProvider(
+  name: string,
+  def: { type?: "openai-compat"; baseUrl: string; apiKey?: string; apiKeyEnv?: string; extraHeaders?: Record<string, string>; routing?: Record<string, unknown>; model?: string },
+): Promise<string> {
+  const existing = (await readJsonIfExists(GLOBAL_CONFIG_PATH)) ?? {};
+  const providers = { ...((existing.providers as Record<string, unknown>) ?? {}), [name]: { type: "openai-compat", ...def } };
+  await Bun.write(GLOBAL_CONFIG_PATH, JSON.stringify({ ...existing, providers }, null, 2) + "\n");
+  return GLOBAL_CONFIG_PATH;
+}

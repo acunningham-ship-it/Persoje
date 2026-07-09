@@ -8,7 +8,8 @@ import type { SessionStore } from "../session/store.ts";
 import type { Router, ProfileStore } from "../router/router.ts";
 import { OpenRouterClient } from "../models/openrouter.ts";
 import type { PersojeConfig } from "../config/config.ts";
-import { setDefaultModel, setConfigValue, setActiveProvider, resolveProvider } from "../config/config.ts";
+import { setDefaultModel, setConfigValue, setActiveProvider, resolveProvider, saveProvider } from "../config/config.ts";
+import { BUILTIN_PROVIDERS, buildProviderMenu, presetHasKey, PRIMER_PROVIDER, type ProviderMenuItem, type ProviderPreset } from "../config/providers.ts";
 import type { LessonLog } from "../memory/lessons.ts";
 import type { FactStore } from "../memory/facts.ts";
 import type { SkillLibrary } from "../memory/skills.ts";
@@ -187,6 +188,19 @@ export function App({
   const [turnsFailed, setTurnsFailed] = useState(0);
   const [pickerSessions, setPickerSessions] = useState<import("../session/store.ts").SessionMeta[]>([]);
   const [pickerSelected, setPickerSelected] = useState(0);
+  // /provider interactive flow: pick from a menu, then (if needed) type a URL or key.
+  type ProvFlow =
+    | { step: "pick"; items: ProviderMenuItem[] }
+    | { step: "url" }
+    | { step: "key"; preset: ProviderPreset };
+  const [provFlow, setProvFlow] = useState<ProvFlow | null>(null);
+  const [provSel, setProvSel] = useState(0);
+  const [provInput, setProvInput] = useState("");
+  // Generic single-choice menu overlay — backs the fixed-option commands
+  // (/theme, /effort, /router, /autonomous). The pattern for "any input command → menu".
+  type MenuOpt = { label: string; value: string; hint?: string };
+  const [optMenu, setOptMenu] = useState<{ title: string; items: MenuOpt[]; onPick: (v: string) => void } | null>(null);
+  const [optSel, setOptSel] = useState(0);
   const [activeTheme, setActiveTheme] = useState<Theme>(() => getTheme((config as any).theme?.name ?? "amber"));
   const [sessionTitle, setSessionTitle] = useState<string>(() => store.get(initialSession)?.title ?? "");
   const [greeted, setGreeted] = useState(false);
@@ -265,6 +279,68 @@ export function App({
 
   const push = useCallback((item: DistOmit<DisplayItem, "id">) => {
     setItems((prev) => [...prev, { ...item, id: nextId++ } as DisplayItem]);
+  }, []);
+
+  // --- /provider switching (shared by `/provider <name>` and the interactive menu) ---
+  // Rebuild the client so the switch takes effect THIS session — it was built once
+  // at startup with the old provider's baseUrl. resetPrimerDetection re-probes /health
+  // for the new endpoint (local → prefix-cache primer mode; else plain requests).
+  const switchProvider = useCallback((name: string) => {
+    config.activeProvider = name;
+    void setActiveProvider(name).catch(() => {});
+    try {
+      const resolved = resolveProvider(config);
+      agent.deps.client = new OpenRouterClient(resolved.apiKey, resolved.baseUrl, resolved.extraHeaders);
+      if (resolved.model) agent.model = resolved.model;
+      agent.resetPrimerDetection();
+      push({ kind: "info", text: `▸ provider → ${name} · ${resolved.baseUrl}${resolved.model ? ` · ${agent.model}` : ""} (live this session)` });
+    } catch (e: any) {
+      push({ kind: "error", text: `provider "${name}" — ${e?.message ?? e}` });
+    }
+  }, [agent, config, push]);
+
+  // Persist a provider entry, mirror it into the in-memory config, then switch.
+  const materializeAndSwitch = useCallback((name: string, def: { baseUrl: string; apiKey?: string; apiKeyEnv?: string; model?: string }) => {
+    if (!config.providers) (config as any).providers = {};
+    (config.providers as any)[name] = { type: "openai-compat", ...def };
+    void saveProvider(name, def).catch(() => {});
+    switchProvider(name);
+  }, [config, switchProvider]);
+
+  // Menu selection → switch now, or advance to a URL / key prompt.
+  const onPickProvider = useCallback((item: ProviderMenuItem) => {
+    if (item.kind === "custom") { setProvFlow({ step: "url" }); setProvInput(""); return; }
+    if (item.kind === "existing") { setProvFlow(null); switchProvider(item.name); return; }
+    const p = item.preset;
+    if (p.name === "openrouter") { setProvFlow(null); switchProvider("openrouter"); return; } // legacy block resolves
+    if (presetHasKey(config, p)) {
+      setProvFlow(null);
+      materializeAndSwitch(p.name, { baseUrl: p.baseUrl, apiKeyEnv: p.apiKeyEnv, model: p.defaultModel });
+      return;
+    }
+    setProvFlow({ step: "key", preset: p }); // no key in env/config → ask for one
+    setProvInput("");
+  }, [config, switchProvider, materializeAndSwitch]);
+
+  // URL / key prompt submitted.
+  const onSubmitProvText = useCallback((flow: ProvFlow, value: string) => {
+    if (!value) { setProvFlow(null); setProvInput(""); return; }
+    if (flow.step === "url") {
+      // local endpoints usually need no auth ("local"); primer-detect probes /health
+      // and enables prefix-cache mode for local URLs only, else falls back to plain requests.
+      materializeAndSwitch(PRIMER_PROVIDER, { baseUrl: value, apiKey: "local" });
+    } else if (flow.step === "key") {
+      const p = flow.preset;
+      materializeAndSwitch(p.name, { baseUrl: p.baseUrl, apiKey: value, model: p.defaultModel });
+    }
+    setProvFlow(null);
+    setProvInput("");
+  }, [materializeAndSwitch]);
+
+  // Open the generic single-choice menu for a fixed-option command.
+  const openMenu = useCallback((title: string, items: MenuOpt[], onPick: (v: string) => void) => {
+    setOptMenu({ title, items, onPick });
+    setOptSel(0);
   }, []);
 
   // Persistent input history.
@@ -667,15 +743,25 @@ export function App({
           });
           break;
         }
-        case "/router":
-          if (rest[0] === "on") router.enabled = true;
-          else if (rest[0] === "off") router.enabled = false;
-          else if (rest[0] === "auto" || rest[0] === "offer") router.mode = rest[0];
-          push({
-            kind: "info",
-            text: `router: ${router.enabled ? "on" : "off"} · mode: ${router.mode} (usage: /router on|off|auto|offer)`,
-          });
+        case "/router": {
+          const apply = (v: string) => {
+            if (v === "on") router.enabled = true;
+            else if (v === "off") router.enabled = false;
+            else if (v === "auto" || v === "offer") router.mode = v;
+            push({ kind: "info", text: `router: ${router.enabled ? "on" : "off"} · mode: ${router.mode}` });
+          };
+          if (!rest[0]) {
+            openMenu("model routing", [
+              { label: "on", value: "on", hint: "routing & escalation" },
+              { label: "off", value: "off", hint: "pin current model" },
+              { label: "auto", value: "auto", hint: "escalate automatically" },
+              { label: "offer", value: "offer", hint: "ask before escalating" },
+            ], apply);
+            break;
+          }
+          apply(rest[0]);
           break;
+        }
         case "/canary":
           void maybeCanary(agent.model, true);
           break;
@@ -933,50 +1019,58 @@ export function App({
           break;
         }
         case "/effort": {
+          const apply = (level: string) => {
+            if (!["low", "mid", "high", "max"].includes(level)) {
+              push({ kind: "error", text: `usage: /effort low|mid|high|max` });
+              return;
+            }
+            if (!(config as any).effort) (config as any).effort = {};
+            (config as any).effort.level = level;
+            // Adjust temperature with effort: low=0.1, mid=0.3, high=0.5, max=0.7
+            const temps: Record<string, number> = { low: 0.1, mid: 0.3, high: 0.5, max: 0.7 };
+            config.model.temperature = temps[level] ?? 0.3;
+            void setConfigValue("effort", "level", level).catch(() => {});
+            push({ kind: "info", text: `▸ effort → ${level} (temperature ${config.model.temperature}, saved)` });
+          };
           const level = rest[0];
-          if (!level || !["low", "mid", "high", "max"].includes(level)) {
-            push({ kind: "info", text: `effort: ${(config as any).effort?.level ?? "mid"} — usage: /effort low|mid|high|max\n  low  = quick answers, minimal verification\n  mid  = balanced (default)\n  high = thorough, verify everything\n  max  = exhaustive, full analysis` });
+          if (!level) {
+            const cur = (config as any).effort?.level ?? "mid";
+            openMenu("thinking effort", [
+              { label: "low", value: "low", hint: "quick, minimal verification" },
+              { label: "mid", value: "mid", hint: "balanced (default)" },
+              { label: "high", value: "high", hint: "thorough, verify everything" },
+              { label: "max", value: "max", hint: "exhaustive, full analysis" },
+            ].map((o) => (o.value === cur ? { ...o, hint: `${o.hint} · current` } : o)), apply);
             break;
           }
-          if (!(config as any).effort) (config as any).effort = {};
-          (config as any).effort.level = level;
-          // Adjust temperature with effort: low=0.1, mid=0.3, high=0.5, max=0.7
-          const temps: Record<string, number> = { low: 0.1, mid: 0.3, high: 0.5, max: 0.7 };
-          config.model.temperature = temps[level] ?? 0.3;
-          void setConfigValue("effort", "level", level).catch(() => {});
-          push({ kind: "info", text: `▸ effort → ${level} (temperature ${config.model.temperature}, saved)` });
+          apply(level);
           break;
         }
         case "/provider": {
           const name = rest[0];
           if (!name) {
-            const active = config.activeProvider ?? "openrouter";
-            const available = Object.keys(config.providers ?? {});
-            if (available.length === 0) {
-              push({ kind: "info", text: `provider: ${active} (no custom providers configured)\nusage: /provider <name> to switch (this session; /dmodel to set default)` });
-            } else {
-              push({ kind: "info", text: `provider: ${active}\navailable: ${available.join(", ")}\nusage: /provider <name>` });
+            setProvFlow({ step: "pick", items: buildProviderMenu(config) }); // interactive menu
+            setProvSel(0);
+            break;
+          }
+          // Direct switch by name. Materialize a known preset (so its baseUrl/model resolve)
+          // if it isn't configured yet and a key is reachable.
+          const preset = BUILTIN_PROVIDERS.find((p) => p.name === name);
+          const configured = !!config.providers?.[name] || name === "openrouter";
+          if (preset && preset.name !== "openrouter" && !configured) {
+            if (!presetHasKey(config, preset)) {
+              push({ kind: "error", text: `no key for "${name}" — set ${preset.apiKeyEnv} or run /provider (menu) to enter one` });
+              break;
             }
+            materializeAndSwitch(name, { baseUrl: preset.baseUrl, apiKeyEnv: preset.apiKeyEnv, model: preset.defaultModel });
             break;
           }
-          const available = Object.keys(config.providers ?? {});
-          if (!available.includes(name) && name !== "openrouter") {
-            push({ kind: "error", text: `unknown provider "${name}" — available: openrouter${available.length ? ", " + available.join(", ") : ""}` });
+          if (!configured) {
+            const available = [...new Set([...BUILTIN_PROVIDERS.map((p) => p.name), ...Object.keys(config.providers ?? {})])];
+            push({ kind: "error", text: `unknown provider "${name}" — try: ${available.join(", ")} (or /provider for the menu)` });
             break;
           }
-          config.activeProvider = name;
-          void setActiveProvider(name).catch(() => {});
-          // Rebuild the client so the switch takes effect THIS session — it was built once at
-          // startup with the old provider's baseUrl, so without this the agent keeps hitting it.
-          try {
-            const resolved = resolveProvider(config);
-            agent.deps.client = new OpenRouterClient(resolved.apiKey, resolved.baseUrl, resolved.extraHeaders);
-            if (resolved.model) agent.model = resolved.model;
-            agent.resetPrimerDetection(); // re-probe /health for the new endpoint next turn
-            push({ kind: "info", text: `▸ provider → ${name} · ${resolved.baseUrl}${resolved.model ? ` · ${agent.model}` : ""} (live this session)` });
-          } catch (e: any) {
-            push({ kind: "error", text: `provider set to "${name}" but client rebuild failed — ${e?.message ?? e}` });
-          }
+          switchProvider(name);
           break;
         }
         case "/plan": {
@@ -995,28 +1089,40 @@ export function App({
           break;
         }
         case "/autonomous": {
-          const sub = rest[0] || "status";
-          void import("../core/autonomous.ts")
-            .then(({ autonomousCmd }) => autonomousCmd(sub, { push, alwaysAllow, exit, sessionId, goal: agent.goal }))
-            .catch((e) => push({ kind: "error", text: `autonomous: ${(e as Error).message}` }));
+          const run = (sub: string) =>
+            void import("../core/autonomous.ts")
+              .then(({ autonomousCmd }) => autonomousCmd(sub, { push, alwaysAllow, exit, sessionId, goal: agent.goal }))
+              .catch((e) => push({ kind: "error", text: `autonomous: ${(e as Error).message}` }));
+          if (!rest[0]) {
+            openMenu("autonomous mode", [
+              { label: "on", value: "on", hint: "persist across disconnect" },
+              { label: "off", value: "off" },
+              { label: "status", value: "status", hint: "show current state" },
+            ], run);
+            break;
+          }
+          run(rest[0]);
           break;
         }
         case "/theme": {
+          const apply = (name: string) => {
+            if (!themeNames.includes(name)) {
+              push({ kind: "error", text: `unknown theme "${name}" — available: ${themeNames.join(", ")}` });
+              return;
+            }
+            if (!(config as any).theme) (config as any).theme = {};
+            (config as any).theme.name = name;
+            setActiveTheme(getTheme(name));
+            void setConfigValue("theme", "name", name).catch(() => {});
+            push({ kind: "info", text: `▸ theme → ${name} (saved)` });
+          };
           const name = rest[0];
           if (!name) {
-            const current = (config as any).theme?.name ?? "amber";
-            push({ kind: "info", text: `theme: ${current}\navailable: ${themeNames.join(", ")}\nusage: /theme <name>` });
+            const cur = (config as any).theme?.name ?? "amber";
+            openMenu("switch theme", themeNames.map((n) => ({ label: n, value: n, hint: n === cur ? "current" : undefined })), apply);
             break;
           }
-          if (!themeNames.includes(name)) {
-            push({ kind: "error", text: `unknown theme "${name}" — available: ${themeNames.join(", ")}` });
-            break;
-          }
-          if (!(config as any).theme) (config as any).theme = {};
-          (config as any).theme.name = name;
-          setActiveTheme(getTheme(name));
-          void setConfigValue("theme", "name", name).catch(() => {});
-          push({ kind: "info", text: `▸ theme → ${name} (saved)` });
+          apply(name);
           break;
         }
         case "/mcp": {
@@ -1153,6 +1259,34 @@ export function App({
         setPending(null);
       }
       return;
+    }
+
+    // Provider flow: pick a provider, or type a custom URL / API key.
+    if (provFlow) {
+      if (provFlow.step === "pick") {
+        const items = provFlow.items;
+        if (key.upArrow) { setProvSel((s) => (s - 1 + items.length) % items.length); return; }
+        if (key.downArrow) { setProvSel((s) => (s + 1) % items.length); return; }
+        if (key.escape) { setProvFlow(null); setProvSel(0); return; }
+        if (key.return) { onPickProvider(items[Math.min(provSel, items.length - 1)]!); return; }
+        return; // swallow other keys while the menu is open
+      }
+      // text step (custom URL / API key)
+      if (key.escape) { setProvFlow(null); setProvInput(""); return; }
+      if (key.return) { onSubmitProvText(provFlow, provInput.trim()); return; }
+      if (key.backspace || key.delete) { setProvInput((v) => v.slice(0, -1)); return; }
+      if (char && !key.ctrl && !key.meta) { setProvInput((v) => v + char.replace(/\x1b\[20[01]~/g, "")); return; }
+      return;
+    }
+
+    // Generic single-choice menu (theme / effort / router / autonomous).
+    if (optMenu) {
+      const n = optMenu.items.length;
+      if (key.upArrow) { setOptSel((s) => (s - 1 + n) % n); return; }
+      if (key.downArrow) { setOptSel((s) => (s + 1) % n); return; }
+      if (key.escape) { setOptMenu(null); return; }
+      if (key.return) { const it = optMenu.items[Math.min(optSel, n - 1)]!; setOptMenu(null); optMenu.onPick(it.value); return; }
+      return; // swallow other keys while open
     }
 
     // Session picker: arrow keys navigate, Enter selects, Escape cancels.
@@ -1406,6 +1540,56 @@ export function App({
           </Box>
           {menuVisible ? (
             <CommandMenu items={menuItems} selected={menuSelected} />
+          ) : provFlow ? (
+            <Box flexDirection="column" marginLeft={2} marginTop={1}>
+              {provFlow.step === "pick" ? (
+                <>
+                  <Text color={activeTheme.accent} bold>choose provider  <Text dimColor>(↑↓ navigate · ↵ select · esc cancel)</Text></Text>
+                  {provFlow.items.map((it, i) => {
+                    const selected = i === provSel;
+                    const keyStr = it.kind === "preset" ? it.preset.name : it.kind === "existing" ? it.name : "custom";
+                    return (
+                      <Text key={keyStr}>
+                        <Text color={selected ? activeTheme.accent : "gray"}>{selected ? "▸ " : "  "}</Text>
+                        <Text color={selected ? activeTheme.accent : undefined}>{it.label}</Text>
+                      </Text>
+                    );
+                  })}
+                </>
+              ) : (
+                <>
+                  <Text color={activeTheme.accent} bold>
+                    {provFlow.step === "url" ? "primer / custom endpoint URL" : `API key for ${provFlow.preset.name}`}
+                    <Text dimColor>  (↵ save · esc cancel)</Text>
+                  </Text>
+                  <Text>
+                    <Text color={activeTheme.accent}>{"▸ "}</Text>
+                    {provFlow.step === "key" ? (
+                      <Text>{"•".repeat(provInput.length)}</Text>
+                    ) : provInput ? (
+                      <Text>{provInput}</Text>
+                    ) : (
+                      <Text dimColor>http://localhost:8000/v1</Text>
+                    )}
+                    <Text color={activeTheme.accent}>▌</Text>
+                  </Text>
+                </>
+              )}
+            </Box>
+          ) : optMenu ? (
+            <Box flexDirection="column" marginLeft={2} marginTop={1}>
+              <Text color={activeTheme.accent} bold>{optMenu.title}  <Text dimColor>(↑↓ navigate · ↵ select · esc cancel)</Text></Text>
+              {optMenu.items.map((it, i) => {
+                const sel = i === optSel;
+                return (
+                  <Text key={it.value}>
+                    <Text color={sel ? activeTheme.accent : "gray"}>{sel ? "▸ " : "  "}</Text>
+                    <Text color={sel ? activeTheme.accent : undefined}>{it.label}</Text>
+                    {it.hint ? <Text dimColor>  {it.hint}</Text> : null}
+                  </Text>
+                );
+              })}
+            </Box>
           ) : pickerSessions.length > 0 ? (
             <Box flexDirection="column" marginLeft={2} marginTop={1}>
               <Text color={activeTheme.accent} bold>resume session  <Text dimColor>(↑↓ navigate · ↵ select · esc cancel)</Text></Text>

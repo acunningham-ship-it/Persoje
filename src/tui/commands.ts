@@ -9,7 +9,7 @@ export const COMMANDS: CommandMeta[] = [
   { name: "/model", args: "[id]", desc: "show model + profile, or switch (this session only)" },
   { name: "/dmodel", args: "<id>", desc: "set the default model (persists to config, all new sessions)" },
   { name: "/models", args: "[filter]", desc: "list tool-capable models (price + context) to pick from" },
-  { name: "/provider", args: "[name]", desc: "show active provider, or switch (this session only)" },
+  { name: "/provider", args: "[name]", desc: "pick a provider from a menu (openrouter, openai, anthropic, primer/custom), or switch by name" },
   { name: "/recap", desc: "summarize the session so far — what's done, current state, next" },
   { name: "/retry", desc: "re-run the last task (e.g. after switching model)" },
   { name: "/copy", args: "[code]", desc: "copy last reply (or its last code block) to clipboard" },
