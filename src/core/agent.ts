@@ -1,11 +1,9 @@
 import type { AgentEvent } from "./events.ts";
 import { Accounting } from "./tokens.ts";
-import { buildSystemPrompt, buildRepoMapSection, buildPinsSection, type EffortLevel, findProjectConventions } from "./prompt.ts";
+import { buildSystemPrompt, buildRepoMapSection, buildPinsSection, findProjectConventions } from "./prompt.ts";
 import { loadPersonality, type Personality } from "./personality.ts";
-import { effortPolicy } from "./effort.ts";
 import { ContextManager } from "../context/manager.ts";
 import { OpenRouterClient, type ToolCallRequest, type ChatMessage } from "../models/openrouter.ts";
-import { getCapabilities } from "../models/capabilities.ts";
 import { ToolError, type ToolContext, type ToolRegistry } from "../tools/types.ts";
 import { ReadCache } from "../tools/read-cache.ts";
 import type { PersojeConfig } from "../config/config.ts";
@@ -59,6 +57,8 @@ export interface AgentDeps {
   onGoalSet?: (goal: string) => void;
   /** Live tool progress (e.g. bash stdout tail) — the TUI shows it in the spinner. */
   onToolProgress?: (name: string, line: string) => void;
+  /** Record usage from an external source (subagent costs roll up to parent). */
+  recordExternalUsage?: (usage: { inputTokens: number; outputTokens: number; cost: number; calls: number }) => void;
 }
 
 /** Tools that can change the system — gated behind the approval hook. */
@@ -84,6 +84,8 @@ export class Agent {
       deps.config.context.budgetTokens,
       deps.config.context.compactionThreshold,
       deps.config.context.keepFullTurns,
+      deps.config.context.headroom,
+      deps.config.context.accurateEstimates,
     );
     // Invalidate read cache on compaction: earlier reads may have been elided.
     // Safe-guarding against returning "[already read]" marker for content the agent no longer has.
@@ -104,6 +106,8 @@ export class Agent {
     // then store the cost; schemas are memoized and stable across turns.
     deps.tools.schemas();
     this.context.setSchemaTokens(deps.tools.schemaTokens());
+    // Wire subagent cost roll-up to this agent's accounting
+    deps.recordExternalUsage = (usage) => this.accounting.recordExternal(usage);
   }
 
   /** Force primer-mode re-detection on the next turn — call after the provider/client changes
@@ -349,14 +353,12 @@ export class Agent {
         let text = "";
         let toolCalls: ToolCallRequest[] = [];
 
-        // Effort-aware system prompt and policy
-        const effort = (config as any).effort?.level ?? "mid";
         const personality = this.deps.personality ?? loadPersonality();
         const skillCatalog = this.deps.skills?.summaryForPrompt() ?? "";
 
-        // seg1 (byte-stable base): base rules + effort + quirks + conventions + personality + memory + skills.
+        // seg1 (byte-stable base): base rules + quirks + conventions + personality + memory + skills.
         // NOT in seg1: repo-map (→ seg3) and goal/todos (→ seg5 pins) — both volatile, kept out so seg1's hash stays stable.
-        const seg1 = buildSystemPrompt(cwd, "", this.deps.memoryContext ?? "", effort, personality, skillCatalog, this.cachedConventions, this.cachedQuirks);
+        const seg1 = buildSystemPrompt(cwd, "", this.deps.memoryContext ?? "", personality, skillCatalog, this.cachedConventions, this.cachedQuirks);
         const seg3RepoMap = buildRepoMapSection(this.deps.repoMap ?? "");
         const pinsSection = buildPinsSection(this.context.goal, this.context.todos);
 
@@ -365,17 +367,6 @@ export class Agent {
         const systemPrompt = primerMode
           ? seg1
           : seg1 + seg3RepoMap + pinsSection;
-
-        // Compute effort policy: reasoning, maxTokens, toolBudget, scaffold
-        const modelCapabilities = getCapabilities(config.model.primary);
-        const policy = effortPolicy(effort as EffortLevel, modelCapabilities);
-
-        // Tool iteration budget: effort-aware cap on how many model→tool→model cycles per turn
-        // (distinct from cost ceiling above, which is a session-level USD limit).
-        if (iterations >= policy.toolBudget) {
-          yield { type: "turn-end", reason: "max-iterations", iterations };
-          return;
-        }
 
         // Build message array: primer-mode vs cloud mode.
         // Primer mode: [system:seg1] [user: seg3+history+pins+current]
@@ -396,7 +387,7 @@ export class Agent {
         // Primer uses on-disk prefix reuse, not cloud cache_control. The hash covers exactly the
         // byte-stable unit primer caches — the seg1 system text + serialized tool schemas — with a
         // domain separator so seg1/tools can't concatenate ambiguously. seg1 carries no repo-map or
-        // goal/todos, so this stays stable for the session (changes only on a rare /effort or skill change).
+        // goal/todos, so this stays stable for the session (changes only on a rare skill change).
         let primerPrefixHash = "";
         if (primerMode) {
           const toolSchemas = JSON.stringify(tools.schemas());
@@ -416,8 +407,8 @@ export class Agent {
           messages,
           tools: tools.schemas(),
           temperature: config.model.temperature,
-          maxTokens: policy.maxTokens,
-          reasoning: policy.reasoning,
+          maxTokens: 8192,
+          reasoning: "none" as const,
           cacheSystemPrompt: !primerMode && config.context.cacheSystemPrompt,
           provider: config.openrouter.provider,
           signal,

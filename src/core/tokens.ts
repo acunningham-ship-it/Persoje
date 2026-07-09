@@ -1,8 +1,16 @@
 import type { UsageReport } from "./events.ts";
 
-/** Rough token estimate (~4 chars/token). Good enough for budgets; real usage comes from the API. */
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+const CODE_PATTERN = /[{}[\]();:<>+\-*/=!&|^~@#$%`\\]/g;
+const CODE_RATIO = 3.5;
+const PROSE_RATIO = 4.5;
+
+export function estimateTokens(text: unknown, accurate = true): number {
+  const str = typeof text === "string" ? text : "";
+  if (!accurate || !str) return Math.ceil(str.length / 4);
+  const codeChars = (str.match(CODE_PATTERN) || []).length;
+  const proseChars = str.length - codeChars;
+  const ratio = (PROSE_RATIO * proseChars + CODE_RATIO * codeChars) / str.length;
+  return Math.ceil(str.length / ratio);
 }
 
 export interface SessionTotals {
@@ -13,12 +21,23 @@ export interface SessionTotals {
   cost: number;
 }
 
-/** Accumulates real per-call usage for the session. */
 export class Accounting {
   private records: UsageReport[] = [];
 
   record(usage: UsageReport): void {
     this.records.push(usage);
+  }
+
+  /** Record usage from an external source (subagent, etc.) */
+  recordExternal(usage: { inputTokens: number; outputTokens: number; cost: number; calls: number }): void {
+    this.records.push({
+      model: "external",
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cachedTokens: 0,
+      cost: usage.cost,
+      durationMs: 0,
+    });
   }
 
   totals(): SessionTotals {
@@ -33,7 +52,6 @@ export class Accounting {
     return t;
   }
 
-  /** Usage for the most recent turn (last `n` calls). */
   last(n = 1): UsageReport[] {
     return this.records.slice(-n);
   }

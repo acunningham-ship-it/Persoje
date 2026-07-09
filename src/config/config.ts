@@ -30,6 +30,10 @@ const ConfigSchema = z.object({
       repoMapTokens: z.number().default(800),
       /** Attach a cache_control breakpoint to the system prompt (providers without caching ignore it). */
       cacheSystemPrompt: z.boolean().default(true),
+      /** Min % of context budget kept free as headroom (0-50). E.g. 20 = compact to 80% at most. */
+      headroom: z.number().min(0).max(50).default(20),
+      /** Use accurate token estimation (code-aware chars/tok ratio instead of fixed 4). */
+      accurateEstimates: z.boolean().default(true),
     })
     .prefault({}),
   loop: z
@@ -52,13 +56,6 @@ const ConfigSchema = z.object({
       maxRetries: z.number().min(0).max(10).default(5),
     })
     .prefault({}),
-  effort: z
-    .object({
-      /** Current effort level: low | mid | high | max */
-      level: z.enum(["low", "mid", "high", "max"]).default("mid"),
-    })
-    .prefault({}),
-  /** Per-tool result caps in tokens (overrides tool defaults). */
   toolResultCaps: z.record(z.string(), z.number()).default({}),
   router: z
     .object({
@@ -252,9 +249,9 @@ export async function setDefaultModel(modelId: string): Promise<string> {
 }
 
 /**
- * Merge a single key into a nested config section (e.g. `theme.name`,
- * `effort.level`), preserving every other key. Backs `/theme` and `/effort`
- * so a chosen theme/effort survives across sessions. Trust level is
+ * Merge a single key into a nested config section (e.g. `theme.name`),
+ * preserving every other key. Backs `/theme`
+ * so a chosen theme survives across sessions. Trust level is
  * deliberately NOT persisted — yolo must re-arm each session (safety).
  */
 export async function setConfigValue(section: string, key: string, value: unknown): Promise<string> {

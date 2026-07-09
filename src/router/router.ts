@@ -233,7 +233,7 @@ export class Router {
     if (depth >= 3) {
       return {
         target: null,
-        reason: `${reason} — escalation chain exhausted (attempted 3 escalations) · consider /effort high, a stronger base model, or rephrasing the task`,
+        reason: `${reason} — escalation chain exhausted (attempted 3 escalations) · consider a stronger base model, or rephrasing the task`,
       };
     }
 

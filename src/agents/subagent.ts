@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { Agent, type AgentDeps } from "../core/agent.ts";
-import type { AgentEvent } from "../core/events.ts";
 import { ToolRegistry, type Tool } from "../tools/types.ts";
 import { truncate } from "../tools/truncate.ts";
-import { estimateTokens } from "../core/tokens.ts";
 import type { PersojeConfig } from "../config/config.ts";
 import { OpenRouterClient } from "../models/openrouter.ts";
 
@@ -188,6 +186,7 @@ export function makeTaskTool(parent: AgentDeps & { cwd: string }): Tool {
       );
 
       const footer = `\n[sub-agent: ${result.usage.calls} calls, $${result.usage.cost.toFixed(5)}]`;
+      parent.recordExternalUsage?.(result.usage);
       return result.summary + footer;
     },
   };

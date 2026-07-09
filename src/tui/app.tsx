@@ -197,13 +197,20 @@ export function App({
   const [provSel, setProvSel] = useState(0);
   const [provInput, setProvInput] = useState("");
   // Generic single-choice menu overlay — backs the fixed-option commands
-  // (/theme, /effort, /router, /autonomous). The pattern for "any input command → menu".
+  // (/theme, /router, /autonomous). The pattern for "any input command → menu".
   type MenuOpt = { label: string; value: string; hint?: string };
   const [optMenu, setOptMenu] = useState<{ title: string; items: MenuOpt[]; onPick: (v: string) => void } | null>(null);
   const [optSel, setOptSel] = useState(0);
   const [activeTheme, setActiveTheme] = useState<Theme>(() => getTheme((config as any).theme?.name ?? "amber"));
   const [sessionTitle, setSessionTitle] = useState<string>(() => store.get(initialSession)?.title ?? "");
   const [greeted, setGreeted] = useState(false);
+  const [cursorBlink, setCursorBlink] = useState(true);
+
+  // Cursor blink every 530ms
+  useEffect(() => {
+    const t = setInterval(() => setCursorBlink((n) => !n), 530);
+    return () => clearInterval(t);
+  }, []);
 
   // Pleasant greeting on first render
   useEffect(() => {
@@ -1018,34 +1025,6 @@ export function App({
           push({ kind: "info", text: "🔓 yolo — all tools auto-run (danger ops still confirm). shift+tab to cycle, or set trust normal." });
           break;
         }
-        case "/effort": {
-          const apply = (level: string) => {
-            if (!["low", "mid", "high", "max"].includes(level)) {
-              push({ kind: "error", text: `usage: /effort low|mid|high|max` });
-              return;
-            }
-            if (!(config as any).effort) (config as any).effort = {};
-            (config as any).effort.level = level;
-            // Adjust temperature with effort: low=0.1, mid=0.3, high=0.5, max=0.7
-            const temps: Record<string, number> = { low: 0.1, mid: 0.3, high: 0.5, max: 0.7 };
-            config.model.temperature = temps[level] ?? 0.3;
-            void setConfigValue("effort", "level", level).catch(() => {});
-            push({ kind: "info", text: `▸ effort → ${level} (temperature ${config.model.temperature}, saved)` });
-          };
-          const level = rest[0];
-          if (!level) {
-            const cur = (config as any).effort?.level ?? "mid";
-            openMenu("thinking effort", [
-              { label: "low", value: "low", hint: "quick, minimal verification" },
-              { label: "mid", value: "mid", hint: "balanced (default)" },
-              { label: "high", value: "high", hint: "thorough, verify everything" },
-              { label: "max", value: "max", hint: "exhaustive, full analysis" },
-            ].map((o) => (o.value === cur ? { ...o, hint: `${o.hint} · current` } : o)), apply);
-            break;
-          }
-          apply(level);
-          break;
-        }
         case "/provider": {
           const name = rest[0];
           if (!name) {
@@ -1279,7 +1258,7 @@ export function App({
       return;
     }
 
-    // Generic single-choice menu (theme / effort / router / autonomous).
+    // Generic single-choice menu (theme / router / autonomous).
     if (optMenu) {
       const n = optMenu.items.length;
       if (key.upArrow) { setOptSel((s) => (s - 1 + n) % n); return; }
@@ -1451,7 +1430,6 @@ export function App({
                 model={agent.model}
                 cwd={cwd}
                 routerState={`${router.enabled ? "on" : "off"} (${router.mode})`}
-                effort={(config as any).effort?.level ?? "mid"}
                 sessionTitle={sessionTitle || undefined}
                 activeTheme={activeTheme}
               />
@@ -1460,7 +1438,7 @@ export function App({
           switch (item.kind) {
             case "user":
               return (
-                <Box key={item.id} marginTop={1}>
+                <Box key={item.id}>
                   <Text color={activeTheme.accent}>{"▸ "}</Text>
                   <Text>{item.text}</Text>
                 </Box>
@@ -1470,23 +1448,21 @@ export function App({
             case "tool":
               // Dense scannable row: icon · name(args) · result
               return item.isError ? (
-                <Box key={item.id} flexDirection="column" marginTop={1}>
+                <Box key={item.id} flexDirection="column">
                   <Text>
-                    <Text color={activeTheme.err}>  ◆ </Text>
-                    <Text color={activeTheme.err}>{TOOL_ICON[item.name] ?? "▸"} </Text>
+                    <Text color={activeTheme.err}>◆ </Text>
                     <Text bold>{item.name}</Text>
                     <Text dimColor>({item.argsPreview})</Text>
                   </Text>
-                  <Text color={activeTheme.err}>    ⌐ {item.note}</Text>
+                  <Text color={activeTheme.err}>  {item.note}</Text>
                 </Box>
               ) : (
-                <Box key={item.id} flexDirection="column" marginTop={1}>
+                <Box key={item.id} flexDirection="column">
                   <Box>
-                    <Text dimColor>  │ </Text>
                     <Text color={activeTheme.accent}>{TOOL_ICON[item.name] ?? "▸"} </Text>
                     <Text>{item.name}</Text>
                     <Text dimColor>({item.argsPreview}) </Text>
-                    <Text dimColor>· {item.note}</Text>
+                    <Text dimColor>{item.note}</Text>
                   </Box>
                   {item.diff && item.diff.length > 0
                     ? item.diff.map((d, di) => (
@@ -1495,7 +1471,7 @@ export function App({
                           color={d.sign === "+" ? activeTheme.ok : d.sign === "-" ? activeTheme.err : undefined}
                           dimColor={d.sign === " "}
                         >
-                          {"      "}
+                          {"    "}
                           {d.sign}
                           {d.sign === " " ? "" : " "}
                           {d.text}
@@ -1506,13 +1482,13 @@ export function App({
               );
             case "info":
               return (
-                <Box key={item.id} marginTop={1}>
+                <Box key={item.id}>
                   <Text dimColor>{item.text}</Text>
                 </Box>
               );
             case "error":
               return (
-                <Box key={item.id} marginTop={1}>
+                <Box key={item.id}>
                   <Text color={activeTheme.err}>✗ {item.text}</Text>
                 </Box>
               );
@@ -1521,22 +1497,22 @@ export function App({
       </Static>
 
       {stream ? (
-        <Box marginTop={1}>
+        <Box>
           <Text>{stream}</Text>
         </Box>
       ) : null}
-      {busy ? <Spinner detail={busyLabel === "thinking" ? undefined : busyLabel} startedAt={busyStart} effort={(config as any).effort?.level ?? "mid"} /> : null}
+      {busy ? <Spinner detail={busyLabel === "thinking" ? undefined : busyLabel} startedAt={busyStart} /> : null}
 
       {pending ? <ApprovalPrompt name={pending.name} args={pending.args} dangerReason={pending.dangerReason} /> : null}
 
       <TodoList items={todos} activeTheme={activeTheme} />
 
       {!pending ? (
-        <Box flexDirection="column" marginTop={1}>
-          <Box borderStyle="round" borderColor={busy ? activeTheme.border : activeTheme.accent} paddingX={1} width={process.stdout.columns || 80}>
+        <Box flexDirection="column">
+          <Box>
             <Text color={activeTheme.accent}>{"▸ "}</Text>
             {input ? <Text>{input}</Text> : <Text dimColor>{busy ? "type to queue…" : "task, or / for commands"}</Text>}
-            <Text color={activeTheme.accent}>▌</Text>
+            <Text color={cursorBlink ? activeTheme.accent : "transparent"}>▌</Text>
           </Box>
           {menuVisible ? (
             <CommandMenu items={menuItems} selected={menuSelected} />
@@ -1616,7 +1592,6 @@ export function App({
               turnStart={busyStart}
               queued={queue.length}
               routerOff={!router.enabled}
-              effort={(config as any).effort?.level ?? "mid"}
               iterations={turnIterations}
               toolsThisTurn={turnTools}
               cacheHit={agent.context.cacheHitRatio}

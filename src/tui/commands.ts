@@ -36,7 +36,6 @@ export const COMMANDS: CommandMeta[] = [
   { name: "/quirks", desc: "known quirks of the current model" },
   { name: "/repomap", desc: "show the repo-map being sent to the model" },
   { name: "/dream", desc: "consolidate recent sessions into memory (free model)" },
-  { name: "/effort", args: "low|mid|high|max", desc: "set thinking effort (depth, thoroughness)" },
   { name: "/theme", args: "[name]", desc: "switch color theme (amber, ocean, forest, rose, mono)" },
   { name: "/mcp", args: "add|remove|connect|list|tools", desc: "manage MCP servers (add, remove, connect, list, tools)" },
   { name: "/personality", args: "show|set|reset|custom", desc: "personality wizard: tone, verbosity, work ethic, etc." },
@@ -55,7 +54,7 @@ export const COMMANDS: CommandMeta[] = [
 export const LIVE_SAFE = new Set<string>([
   "/help", "/cost", "/budget", "/status", "/config", "/permissions", "/sessions",
   "/memory", "/skills", "/lessons", "/quirks", "/repomap", "/stats",
-  "/diff", "/copy", "/models", "/theme", "/effort", "/router", "/goal",
+  "/diff", "/copy", "/models", "/theme", "/router", "/goal",
   "/exit", "/quit",
 ]);
 

@@ -4,6 +4,9 @@ import { truncate } from "../tools/truncate.ts";
 import type { TodoItem } from "../tools/types.ts";
 import { createHash } from "node:crypto";
 
+/** Default: code-aware estimation */
+const ACCURATE_DEFAULT = true;
+
 /**
  * ContextManager v3 — optimized context handling for OpenRouter.
  *
@@ -82,6 +85,8 @@ export class ContextManager {
     private budgetTokens: number,
     private compactionThreshold: number,
     private keepFullTurns = 4,
+    private headroom = 20,
+    private accurateEstimate = ACCURATE_DEFAULT,
   ) {}
 
   private push(msg: ChatMessage): void {
@@ -130,7 +135,7 @@ export class ContextManager {
   build(systemPrompt: string): ChatMessage[] {
     const { messages: elided, elidedCount } = this.elideByPriority();
     const result: ChatMessage[] = [{ role: "system", content: systemPrompt }, ...elided];
-    this.lastBuildTokens = result.reduce((sum, m) => sum + estimateTokens(m.content ?? ""), 0);
+    this.lastBuildTokens = result.reduce((sum, m) => sum + this.estimate(m.content ?? ""), 0);
     this.lastBuildMessageCount = result.length;
     this.lastElidedCount = elidedCount;
     this.lastCacheBreakpoints = 0;
@@ -271,7 +276,7 @@ export class ContextManager {
       }
     }
 
-    this.lastBuildTokens = result.reduce((sum, m) => sum + estimateTokens(m.content ?? ""), 0);
+    this.lastBuildTokens = result.reduce((sum, m) => sum + this.estimate(m.content ?? ""), 0);
     this.lastBuildMessageCount = result.length;
     this.lastCacheBreakpoints = cacheBreakpoints;
 
@@ -416,7 +421,7 @@ export class ContextManager {
       if (currentTokens <= targetTokens) break;
       const m = result[i]!;
       if (m.role === "tool" && m.content.length > 200 && !m.content.endsWith("[elided]")) {
-        const oldLen = estimateTokens(m.content);
+        const oldLen = this.estimate(m.content);
         if (i < oldThreshold) {
           // Aggressive compression for old results: one-liner summary
           const firstLine = m.content.split("\n")[0] ?? "";
@@ -425,7 +430,7 @@ export class ContextManager {
           // Standard compression: keep 120 chars
           result[i] = { ...m, content: m.content.slice(0, 120) + "…[elided]" };
         }
-        currentTokens -= oldLen - estimateTokens(result[i]!.content);
+        currentTokens -= oldLen - this.estimate(result[i]!.content);
         elidedCount++;
       }
     }
@@ -433,9 +438,13 @@ export class ContextManager {
     return { messages: result, elidedCount };
   }
 
+  private estimate(content: unknown): number {
+    return estimateTokens(content, this.accurateEstimate);
+  }
+
   estimateTokensUsed(): number {
     let total = 0;
-    for (const m of this.messages) total += estimateTokens(m.content ?? "");
+    for (const m of this.messages) total += this.estimate(m.content);
     return total;
   }
 
@@ -476,25 +485,18 @@ export class ContextManager {
    * compact earlier to avoid running out of room mid-turn.
    */
   needsCompaction(): boolean {
-    const used = this.effectiveTokens(); // real size incl. system prompt + tool schemas
-    const ratio = used / this.budgetTokens;
+    const headroomRatio = this.headroom / 100;
+    const effectiveBudget = this.budgetTokens * (1 - headroomRatio);
+    const used = this.effectiveTokens();
+    const ratio = used / effectiveBudget;
 
-    // Update velocity estimate
     const delta = used - this.lastBuildTokens;
     this.velocity = this.velocity * 0.7 + Math.max(0, delta) * 0.3;
 
-    // If context is growing fast (>5% of budget per turn), compact at 60%
-    // If growing slowly, compact at the configured threshold
-    const velocityRatio = this.velocity / this.budgetTokens;
+    const velocityRatio = this.velocity / effectiveBudget;
     const dynamicThreshold = velocityRatio > 0.05 ? 0.6 : this.compactionThreshold;
     if (ratio > dynamicThreshold) return true;
 
-    // Turn-count trigger: fold older turns into the summary once we're a few turns
-    // deep, so we don't replay the whole transcript every turn. BUT skip this when
-    // the provider is caching the prefix well (e.g. owl-alpha) — there, replaying
-    // history is a cheap, fast cache read, while compacting would invalidate the
-    // cache AND cost a summary call. Let it ride; the token-budget trigger above
-    // still protects against actually approaching the window.
     if (this.cachingWell()) return false;
     const userTurns = this.messages.filter(
       (m) => m.role === "user" && !m.content.startsWith("[Summary of earlier conversation]"),

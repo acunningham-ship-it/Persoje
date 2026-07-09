@@ -1,11 +1,5 @@
 /**
- * System prompt builder. Effort-aware, identity-driven, personality-infused.
- *
- * Effort levels control how the agent reasons:
- *   low  — quick answers, minimal tool use, skip verification
- *   mid  — balanced (default): read before edit, verify after, concise
- *   high — thorough: explore broadly, verify every step, explain reasoning
- *   max  — exhaustive: full analysis, consider edge cases, never skip verification
+ * System prompt builder. Personality-infused.
  *
  * Personality controls tone, verbosity, work ethic, formality, humor, code style.
  *
@@ -19,15 +13,6 @@ import { renderTodos } from "../tools/todo-tools.ts";
 import { existsSync } from "fs";
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
-
-export type EffortLevel = "low" | "mid" | "high" | "max";
-
-const EFFORT_PROMPTS: Record<EffortLevel, string> = {
-  low: `Effort: LOW. Speed over precision. Skip reading whole files—grep for what you need. Assume common patterns. Make one attempt and move on. No verification pass.`,
-  mid: `Effort: MID. Balanced. Read the file before editing (full read if <500 lines, else grep + targeted sections). Test after edits. Be concise—one paragraph per message. Verify your changes work.`,
-  high: `Effort: HIGH. Thorough and deliberate. (1) PLAN: read broadly, identify all affected files, state assumptions. (2) EXECUTE: make targeted, confident changes. (3) VERIFY: run tests, confirm no regressions. Explain non-obvious choices. Consider edge cases.`,
-  max: `Effort: MAX. Exhaustive verification loop. (1) EXPLORE: read every relevant file, understand the entire context tree. (2) PLAN in detail: state all assumptions, identify failure modes. (3) EXECUTE with precision. (4) VERIFY thoroughly: tests, edge cases, integration points. (5) AUDIT: review your own changes for correctness. Tolerate slowness for certainty.`,
-};
 
 export function findProjectConventions(cwd: string): string {
   let current = cwd;
@@ -78,7 +63,7 @@ export function buildPinsSection(goal: string, todos: TodoItem[]): string {
 }
 
 /**
- * Build the system prompt: stable segment 1 (base rules + effort + quirks + conventions + personality + memory + skills).
+ * Build the system prompt: stable segment 1 (base rules + quirks + conventions + personality + memory + skills).
  * REMOVED: goal and todos (those are now in buildPinsSection and injected separately).
  * REMOVED: repoMap is not bundled here (it's segment 3, built separately via buildRepoMapSection).
  *
@@ -95,7 +80,6 @@ export function buildSystemPrompt(
   // for call-site compatibility but intentionally unused here.
   _repoMap = "",
   memory = "",
-  effort: EffortLevel = "mid",
   personality?: Personality,
   skillCatalog?: string,
   conventions = "",
@@ -139,5 +123,5 @@ Work by calling tools. Rules:
 - You can create new skills with add_skill when you discover a reusable procedure.
 - You can invoke skills with invoke_skill when you need to follow a known procedure.
 - Skills are lazy-loaded: you see names + descriptions, but must invoke_skill to get the full content.
-${EFFORT_PROMPTS[effort]}${quirksSection}${projectConventionsSection}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${skillSection}`;
+${quirksSection}${projectConventionsSection}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${skillSection}`;
 }
