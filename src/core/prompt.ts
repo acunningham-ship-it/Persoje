@@ -84,5 +84,6 @@ export function buildSystemPrompt(
 
 Read before you edit. Edits use exact search/replace. Prefer narrow reads and grep.
 Verify after editing. Don't guess — web_search then web_fetch. When done, stop.
-Be concise. Keep working until fully done. Debug and retry on failure.${quirksSection}${projectConventionsSection}${skillSection}`;
+Be concise. Keep working until fully done. Debug and retry on failure.
+Use 'transcript' to search full history if you need dropped details.${quirksSection}${projectConventionsSection}${skillSection}`;
 }

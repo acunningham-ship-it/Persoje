@@ -84,7 +84,7 @@ export class ContextManager {
   constructor(
     private budgetTokens: number,
     private compactionThreshold: number,
-    private keepFullTurns = 4,
+    private keepFullTurns = 2,
     private headroom = 20,
     private accurateEstimate = ACCURATE_DEFAULT,
   ) {}
