@@ -13,17 +13,16 @@ import { ToolError, type Tool, type TodoItem } from "./types.ts";
  */
 export const updateTodosTool: Tool = {
   name: "update_todos",
-  description:
-    "Maintain a checklist for a multi-step task. Pass the FULL list each time (it replaces the old one). Mark steps done as you finish them and keep exactly one in_progress. Skip this for trivial one-step tasks.",
+  description: "Checklist for multi-step tasks. Pass full list each time (replaces old). One step in_progress at a time.",
   args: z.object({
     todos: z
       .array(
         z.object({
-          content: z.string().describe("Short imperative step, e.g. 'Add the web_fetch tool'"),
+          content: z.string().describe("Short imperative step"),
           status: z.enum(["pending", "in_progress", "done"]),
         }),
       )
-      .describe("The complete, ordered list of steps"),
+      .describe("Complete ordered list of steps"),
   }),
   maxResultTokens: 120,
   async execute({ todos }, ctx) {

@@ -37,4 +37,5 @@ export type AgentEvent =
   | { type: "todos"; items: TodoItem[] }
   | { type: "retry"; attempt: number; maxRetries: number; delayMs: number; reason: string }
   | { type: "turn-end"; reason: TurnEndReason; iterations: number }
-  | { type: "error"; message: string; fatal: boolean };
+  | { type: "error"; message: string; fatal: boolean }
+  | { type: "monitor-event"; name: string; output: string; error: string; exitCode: number };

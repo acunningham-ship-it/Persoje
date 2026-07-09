@@ -9,10 +9,9 @@ import { truncate } from "./truncate.ts";
  */
 export const setGoalTool: Tool = {
   name: "set_goal",
-  description:
-    "Record the session goal once you understand the task. One short paragraph: the objective + any key constraints. Call this before starting real work; call again to refine it.",
+  description: "Record the session goal: objective + constraints, one short paragraph.",
   args: z.object({
-    goal: z.string().describe("The objective and constraints, one short paragraph"),
+    goal: z.string().describe("Objective and constraints, one short paragraph"),
   }),
   maxResultTokens: 80,
   async execute({ goal }, ctx) {
@@ -30,12 +29,11 @@ export const setGoalTool: Tool = {
  */
 export const transcriptTool: Tool = {
   name: "transcript",
-  description:
-    "Consult the full session transcript when you're missing earlier detail the summary dropped. action 'search' finds matching lines; 'tail' shows the most recent N lines.",
+  description: "Search or tail the full session transcript for dropped details.",
   args: z.object({
     action: z.enum(["search", "tail"]),
-    query: z.string().optional().describe("substring to search for (action=search)"),
-    lines: z.number().optional().describe("how many lines for tail (default 80)"),
+    query: z.string().optional().describe("Search substring (for action=search)"),
+    lines: z.number().optional().describe("Lines for tail (default 80)"),
   }),
   maxResultTokens: 2500,
   async execute({ action, query, lines }, ctx) {

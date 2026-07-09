@@ -7,7 +7,7 @@ describe("buildSystemPrompt (seg1 — stable base)", () => {
   test("includes base rules", () => {
     const p = buildSystemPrompt("/repo");
     expect(p).toContain("You are Persoje");
-    expect(p).toContain("Read before you edit");
+    expect(p).toContain("Read first");
   });
 
   test("does NOT include goal or todos (those are in buildPinsSection)", () => {
@@ -124,7 +124,7 @@ describe("buildPinsSection (seg5 — volatile goal+todos)", () => {
 
   test("default goal section when goal is empty", () => {
     const p = buildPinsSection("", []);
-    expect(p).toContain("No session goal is set yet");
+    expect(p).toContain("No goal set yet");
   });
 
   test("goal appears before plan", () => {

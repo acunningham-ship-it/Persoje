@@ -18,6 +18,7 @@ import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar, AssistantBlock
 import { editDiffLines, type DiffLine } from "./diff.ts";
 import { theme, getTheme, themeNames, type Theme } from "./theme.ts";
 import { loadPersonality, savePersonality, formatPersonality, PERSONALITY_OPTIONS, type Personality } from "../core/personality.ts";
+import { getMonitorManager, type MonitorConfig } from "../core/monitors.ts";
 import type { McpManager } from "../mcp/client.ts";
 
 /** Single-width glyphs per tool — Persoje's geometric style. */
@@ -683,6 +684,53 @@ export function App({
         case "/config":
           push({ kind: "info", text: JSON.stringify(config, null, 2) });
           break;
+        case "/monitor": {
+          const sub = rest[0]?.toLowerCase();
+          if (sub === "add") {
+            const name = rest[1];
+            const interval = parseInt(rest[rest.length - 1]!, 10);
+            const hasInterval = !Number.isNaN(interval);
+            const cmdParts = hasInterval ? rest.slice(2, -1) : rest.slice(2);
+            const cmd = cmdParts.join(" ");
+            if (!name || !cmd) {
+              push({ kind: "error", text: "usage: /monitor add <name> <cmd> [interval_sec]" });
+              break;
+            }
+            getMonitorManager().add({
+              name,
+              cmd,
+              intervalSec: hasInterval ? interval : 30,
+              cooldownSec: hasInterval ? interval : 30,
+              description: cmd.slice(0, 80),
+              enabled: true,
+            });
+            push({ kind: "info", text: `monitor '${name}' added (every ${hasInterval ? interval : 30}s): ${cmd}` });
+          } else if (sub === "list") {
+            const list = getMonitorManager().list();
+            if (!list.length) {
+              push({ kind: "info", text: "no monitors active" });
+            } else {
+              const lines = list.map((m) =>
+                `${m.config.enabled ? "🟢" : "⚫"} ${m.config.name}  every ${m.config.intervalSec}s  "${m.config.cmd.slice(0, 60)}"  fires: ${m.fireCount}${m.lastExitCode !== null ? `  last: exit ${m.lastExitCode}` : ""}`
+              );
+              push({ kind: "info", text: `monitors:\n` + lines.join("\n") });
+            }
+          } else if (sub === "rm" || sub === "remove") {
+            const name = rest[1];
+            if (!name) {
+              push({ kind: "error", text: "usage: /monitor rm <name>" });
+              break;
+            }
+            if (getMonitorManager().remove(name)) {
+              push({ kind: "info", text: `monitor '${name}' removed` });
+            } else {
+              push({ kind: "error", text: `no monitor named '${name}'` });
+            }
+          } else {
+            push({ kind: "error", text: "usage: /monitor add <name> <cmd> [interval] | list | rm <name>" });
+          }
+          break;
+        }
         case "/permissions":
           if (rest[0] === "clear") {
             alwaysAllow.current.clear();

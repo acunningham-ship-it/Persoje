@@ -17,15 +17,13 @@ export function looksLikeServer(cmd: string): boolean {
 export const bashTool: Tool = {
   name: "bash",
   description:
-    "Run a bash command. Output is capped — pipe through head/tail/grep for large output. " +
-    "For processes that don't exit on their own (servers, watchers, daemons), pass background:true " +
-    "so they run detached and return immediately instead of blocking the turn.",
+    "Run a bash command. Use background:true for servers/daemons that don't exit.",
   args: z.object({
     command: z.string(),
     background: z
       .boolean()
       .optional()
-      .describe("Run detached, return immediately with the PID. Use for servers/daemons that keep running."),
+      .describe("Run detached (for servers/daemons)"),
   }),
   maxResultTokens: 2000,
   async execute({ command, background }, ctx) {
@@ -125,11 +123,11 @@ export const bashTool: Tool = {
 
 export const grepTool: Tool = {
   name: "grep",
-  description: "Search file contents with a regex (ripgrep). Returns matching lines with file:line.",
+  description: "Regex search (ripgrep). Returns file:line matches.",
   args: z.object({
-    pattern: z.string().describe("Regex pattern"),
-    path: z.string().optional().describe("File or directory (default: cwd)"),
-    glob: z.string().optional().describe("Filter files, e.g. '*.ts'"),
+    pattern: z.string().describe("Regex"),
+    path: z.string().optional().describe("File or directory"),
+    glob: z.string().optional().describe("Filter by glob, e.g. '*.ts'"),
   }),
   maxResultTokens: 2500,
   async execute({ pattern, path, glob }, ctx) {

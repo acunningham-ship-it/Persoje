@@ -32,6 +32,7 @@ export const COMMANDS: CommandMeta[] = [
   { name: "/mcp", args: "add|remove|connect|list|tools", desc: "manage MCP servers" },
   { name: "/personality", args: "show|set|reset|custom", desc: "personality wizard" },
   { name: "/plan", args: "[on|off]", desc: "plan mode: think & spec before acting" },
+  { name: "/monitor", args: "add|list|rm", desc: "manage background monitors: add <name> <cmd> [interval], list, rm <name>" },
   { name: "/autonomous", args: "on|off|status", desc: "toggle persistent mode (survives disconnect)" },
   { name: "/permsoff", desc: "auto-approve all tool calls (no confirmation)" },
   { name: "/help", desc: "all commands" },

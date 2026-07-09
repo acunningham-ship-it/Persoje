@@ -49,11 +49,11 @@ function resolveInCwd(path: string, ctx: ToolContext): string {
 
 export const readTool: Tool = {
   name: "read",
-  description: "Read a file. Returns numbered lines. Use offset/limit for large files.",
+  description: "Read a file. Use offset/limit for large files.",
   args: z.object({
-    path: z.string().describe("File path (absolute or relative)"),
-    offset: z.number().optional().describe("1-based start line"),
-    limit: z.number().optional().describe("Max lines to return"),
+    path: z.string().describe("File path"),
+    offset: z.number().optional().describe("Start line (1-based)"),
+    limit: z.number().optional().describe("Max lines"),
   }),
   maxResultTokens: 4000,
   async execute({ path, offset, limit }, ctx) {
@@ -136,8 +136,7 @@ export const writeTool: Tool = {
 
 export const editTool: Tool = {
   name: "edit",
-  description:
-    "Edit a file by exact search/replace. old_string must match exactly once (include surrounding lines to disambiguate); set replace_all to replace every occurrence.",
+  description: "Search/replace edit. Must match exactly once; use replace_all for all occurrences.",
   args: z.object({
     path: z.string(),
     old_string: z.string(),
@@ -158,8 +157,7 @@ export const editTool: Tool = {
 
 export const multiEditTool: Tool = {
   name: "multi_edit",
-  description:
-    "Apply several search/replace edits to ONE file in order, atomically — all succeed or nothing is written. Each edit sees the result of the previous one. Use this instead of many separate edit calls to the same file.",
+  description: "Atomic batch edits to one file. All succeed or nothing written.",
   args: z.object({
     path: z.string(),
     edits: z
@@ -171,7 +169,7 @@ export const multiEditTool: Tool = {
         }),
       )
       .min(1)
-      .describe("Edits applied in order; each sees the previous edit's result"),
+      .describe("Edits applied in order"),
   }),
   maxResultTokens: 300,
   async execute({ path, edits }, ctx) {
@@ -202,7 +200,7 @@ export const lsTool: Tool = {
   name: "ls",
   description: "List directory contents.",
   args: z.object({
-    path: z.string().optional().describe("Directory (default: cwd)"),
+    path: z.string().optional().describe("Directory"),
   }),
   maxResultTokens: 1500,
   async execute({ path }, ctx) {
@@ -222,7 +220,7 @@ export const globTool: Tool = {
   description: "Find files matching a glob pattern, e.g. 'src/**/*.ts'.",
   args: z.object({
     pattern: z.string(),
-    path: z.string().optional().describe("Base directory (default: cwd)"),
+    path: z.string().optional().describe("Base directory"),
   }),
   maxResultTokens: 1500,
   async execute({ pattern, path }, ctx) {

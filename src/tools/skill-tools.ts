@@ -13,11 +13,11 @@ import type { SkillLibrary } from "../memory/skills.ts";
 export function makeAddSkillTool(skills: SkillLibrary): Tool {
   return {
     name: "add_skill",
-    description: "Create a new skill in the library. Skills are reusable procedures the agent can invoke later. Give a clear name, one-line description, and the full skill body (step-by-step instructions).",
+    description: "Create a reusable skill: name, description, step-by-step body.",
     args: z.object({
-      name: z.string().describe("Skill name (kebab-case, e.g. 'debug-react-component')"),
-      description: z.string().describe("One-line description of what this skill does"),
-      body: z.string().describe("Full skill body: step-by-step instructions, code snippets, patterns to follow"),
+      name: z.string().describe("Skill name (kebab-case)"),
+      description: z.string().describe("One-line description"),
+      body: z.string().describe("Full body: instructions, snippets, patterns"),
     }),
     maxResultTokens: 200,
     execute: async (args, _ctx) => {
@@ -30,7 +30,7 @@ export function makeAddSkillTool(skills: SkillLibrary): Tool {
 export function makeInvokeSkillTool(skills: SkillLibrary): Tool {
   return {
     name: "invoke_skill",
-    description: "Load and return a skill's full content from the library. Use this when you need to follow a skill's instructions. The skill content is NOT in context until you invoke this tool.",
+    description: "Load a skill's instructions from the library (content not pre-loaded).",
     args: z.object({
       name: z.string().describe("Name of the skill to invoke"),
     }),

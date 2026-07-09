@@ -43,7 +43,7 @@ export function buildRepoMapSection(repoMap: string): string {
 export function buildPinsSection(goal: string, todos: TodoItem[]): string {
   const goalSection = goal
     ? `\n\nSESSION GOAL (keep this in focus; everything you do should serve it):\n${goal}`
-    : `\n\nNo session goal is set yet. Before substantial work: if the task is ambiguous, ask 1-3 clarifying questions first (reply in text, no tools). Once clear, call set_goal with a one-paragraph objective, then proceed. If the task is already clear, call set_goal and continue in the same turn.`;
+    : `\n\nNo goal set yet. If ambiguous, ask 1-3 clarifying questions (text only). Once clear or if already clear, call set_goal and continue.`;
 
   const todoSection = todos.length
     ? `\n\nWORKING PLAN (update_todos to revise; mark steps done as you go):\n${renderTodos(todos)}`
@@ -82,8 +82,8 @@ export function buildSystemPrompt(
 
   return `You are Persoje, a coding agent. cwd: ${cwd}
 
-Read before you edit. Edits use exact search/replace. Prefer narrow reads and grep.
-Verify after editing. Don't guess — web_search then web_fetch. When done, stop.
-Be concise. Keep working until fully done. Debug and retry on failure.
-Use 'transcript' to search full history if you need dropped details.${quirksSection}${projectConventionsSection}${skillSection}`;
+Read first. Edits use exact search/replace. Prefer narrow reads/grep.
+Verify edits. Search then fetch. Stop when done.
+Be concise. Finish fully. Debug and retry on failure.
+Use transcript for dropped details.${quirksSection}${projectConventionsSection}${skillSection}`;
 }

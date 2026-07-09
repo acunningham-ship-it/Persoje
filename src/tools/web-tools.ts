@@ -206,9 +206,9 @@ export function ssrfReason(rawUrl: string): string | null {
 
 export const webFetchTool: Tool = {
   name: "web_fetch",
-  description: "Fetch a URL and return its main text as clean markdown (HTML stripped, capped). Use for docs, RFCs, changelogs, error-page lookups.",
+  description: "Fetch a URL as clean markdown (HTML stripped).",
   args: z.object({
-    url: z.string().describe("The URL to fetch (https:// assumed if no scheme)"),
+    url: z.string().describe("URL (https:// assumed if no scheme)"),
   }),
   maxResultTokens: 3000,
   async execute({ url }, ctx) {
@@ -279,7 +279,7 @@ export function parseDdgResults(html: string, limit: number): SearchResult[] {
 
 export const webSearchTool: Tool = {
   name: "web_search",
-  description: "Search the web (keyless, via DuckDuckGo). Returns top results as title · url · snippet. Follow up with web_fetch to read one.",
+  description: "Web search (DuckDuckGo). Returns title · url · snippet.",
   args: z.object({
     query: z.string().describe("Search query"),
     limit: z.number().optional().describe("Max results (default 6)"),

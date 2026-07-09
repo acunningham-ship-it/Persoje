@@ -103,6 +103,11 @@ export class ContextManager {
     this.push({ role: "user", content });
   }
 
+  /** Inject a system message mid-turn (used for monitor events, intercom alerts, etc.). */
+  addSystem(content: string): void {
+    this.push({ role: "system", content });
+  }
+
   addAssistant(content: string, toolCalls?: ToolCallRequest[]): void {
     this.push({
       role: "assistant",
