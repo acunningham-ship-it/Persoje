@@ -46,14 +46,12 @@ export function Banner({
   version,
   model,
   cwd,
-  routerState,
   sessionTitle,
   activeTheme,
 }: {
   version: string;
   model: string;
   cwd: string;
-  routerState: string;
   sessionTitle?: string;
   activeTheme?: Theme;
 }): React.ReactElement {
@@ -68,7 +66,7 @@ export function Banner({
         {gradient("persoje", t.gradFrom, t.gradTo)}
         <Text dimColor> v{version} · {truncate(model)} · {truncate(shortCwd)}</Text>
       </Text>
-      <Text dimColor>/{sessionTitle || "new session"} · router {routerState} · /help</Text>
+      <Text dimColor>/{sessionTitle || "new session"} · /help</Text>
     </Box>
   );
 }
@@ -113,7 +111,6 @@ export function StatusBar({
   busy,
   turnStart,
   queued,
-  routerOff,
   iterations,
   planMode,
   trust,
@@ -129,7 +126,6 @@ export function StatusBar({
   busy: boolean;
   turnStart: number;
   queued: number;
-  routerOff: boolean;
   iterations?: number;
   planMode?: boolean;
   trust?: string;

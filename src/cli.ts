@@ -15,7 +15,6 @@ import { TranscriptWriter } from "./context/transcript.ts";
 import { setGoalTool, transcriptTool } from "./tools/goal-tools.ts";
 import { updateTodosTool } from "./tools/todo-tools.ts";
 import { buildRepoMap } from "./context/repo-map.ts";
-import { ProfileStore, Router } from "./router/router.ts";
 import { FactStore } from "./memory/facts.ts";
 import { LessonLog } from "./memory/lessons.ts";
 import { SkillLibrary } from "./memory/skills.ts";
@@ -407,19 +406,12 @@ async function main(): Promise<void> {
     const modelWindows = await client.modelContextWindows();
 
     const profiles = new ProfileStore();
-    const router = new Router({
-      enabled: config.router.enabled,
-      mode: config.router.mode,
-      failureThreshold: config.router.failureThreshold,
-      profiles,
-      escalateTo: config.router.escalateTo,
-    });
 
     const { render } = await import("ink");
     const React = await import("react");
     const { App } = await import("./tui/app.tsx");
     const instance = render(
-      React.createElement(App, { agent, store, sessionId, cwd, router, profiles, client, config, lessons, facts, skills, mcp, modelWindows }),
+      React.createElement(App, { agent, store, sessionId, cwd, profiles, client, config, lessons, facts, skills, mcp, modelWindows }),
       { exitOnCtrlC: true },
     );
 

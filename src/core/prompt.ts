@@ -1,11 +1,3 @@
-/**
- * System prompt builder. Personality-infused.
- *
- * Personality controls tone, verbosity, work ethic, formality, humor, code style.
- *
- * Skills are listed by name + description only (lazy-loaded on invocation).
- */
-
 import type { Personality } from "./personality.ts";
 import { personalityPrompt, DEFAULT_PERSONALITY } from "./personality.ts";
 import type { TodoItem } from "../tools/types.ts";
@@ -75,53 +67,27 @@ export function buildPinsSection(goal: string, todos: TodoItem[]): string {
  */
 export function buildSystemPrompt(
   cwd: string,
-  // repoMap is built separately as seg3 (buildRepoMapSection) and kept OUT of seg1,
-  // so the system base stays byte-stable — it's primer's disk-cache key. Param retained
-  // for call-site compatibility but intentionally unused here.
   _repoMap = "",
   memory = "",
-  personality?: Personality,
+  _personality?: Personality,
   skillCatalog?: string,
   conventions = "",
   quirks: string[] = [],
 ): string {
-  const personalitySection = personality
-    ? `\n\n${personalityPrompt(personality)}`
-    : `\n\n${personalityPrompt(DEFAULT_PERSONALITY)}`;
+  const skillSection = skillCatalog ? `\n\n${skillCatalog}` : "";
 
-  const skillSection = skillCatalog
-    ? `\n\n${skillCatalog}`
-    : "";
-
-  // Known quirks of this model: brief coaching to avoid known failure modes.
-  // Render top 3 only, capped at ~100 tokens for cache stability.
   const quirksSection =
     quirks.length > 0
-      ? `\n\nKnown quirks of this model:\n${quirks
-          .slice(0, 3)
-          .map((q) => `• ${q}`)
-          .join("\n")}`
+      ? `\n\nModel quirks:\n${quirks.slice(0, 3).map((q) => `• ${q}`).join("\n")}`
       : "";
 
-  // Use cached project conventions (loaded once at Agent initialization).
   const projectConventionsSection = conventions
-    ? `\n\nPROJECT CONVENTIONS (auto-loaded):\n${conventions}\n\n---\nBOOT INSTRUCTION: Call get_context (if available) on first run to load shared state across the team/workspace.`
+    ? `\n\nProject conventions:\n${conventions}`
     : "";
 
-  return `You are Persoje, a coding agent in a terminal. cwd: ${cwd}
+  return `You are Persoje, a coding agent. cwd: ${cwd}
 
-Work by calling tools. Rules:
-- Read before you edit. Edits use exact search/replace: old_string must match the file exactly.
-- Prefer narrow reads (offset/limit) and targeted grep over reading whole files.
-- Tool output is capped; re-run with narrower scope rather than asking for everything.
-- After editing, verify (run the relevant command/test) before claiming success.
-- Don't guess at an unfamiliar library/API/error — web_search for it, then web_fetch the docs.
-- When the task is complete, reply with a short summary and stop calling tools.
-- Be concise. No filler.
-- Keep working until the task is fully done. Do not stop early or give up.
-- If something fails, debug it and try again. Iterate until it works.
-- You can create new skills with add_skill when you discover a reusable procedure.
-- You can invoke skills with invoke_skill when you need to follow a known procedure.
-- Skills are lazy-loaded: you see names + descriptions, but must invoke_skill to get the full content.
-${quirksSection}${projectConventionsSection}${personalitySection}${memory ? `\n\nMemory (fetch full facts with the read tool when relevant):\n${memory}` : ""}${skillSection}`;
+Read before you edit. Edits use exact search/replace. Prefer narrow reads and grep.
+Verify after editing. Don't guess — web_search then web_fetch. When done, stop.
+Be concise. Keep working until fully done. Debug and retry on failure.${quirksSection}${projectConventionsSection}${memory ? `\n\nMemory:\n${memory}` : ""}${skillSection}`;
 }

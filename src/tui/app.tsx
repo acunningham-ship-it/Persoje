@@ -5,15 +5,14 @@ import { homedir } from "node:os";
 import { truncate } from "../tools/truncate.ts";
 import type { Agent } from "../core/agent.ts";
 import type { SessionStore } from "../session/store.ts";
-import type { Router, ProfileStore } from "../router/router.ts";
+import type { ProfileStore } from "../router/router.ts";
 import { OpenRouterClient } from "../models/openrouter.ts";
 import type { PersojeConfig } from "../config/config.ts";
-import { setDefaultModel, setConfigValue, setActiveProvider, resolveProvider, saveProvider } from "../config/config.ts";
+import { setConfigValue, setActiveProvider, resolveProvider, saveProvider } from "../config/config.ts";
 import { BUILTIN_PROVIDERS, buildProviderMenu, presetHasKey, PRIMER_PROVIDER, type ProviderMenuItem, type ProviderPreset } from "../config/providers.ts";
 import type { LessonLog } from "../memory/lessons.ts";
 import type { FactStore } from "../memory/facts.ts";
 import type { SkillLibrary } from "../memory/skills.ts";
-import { runCanary, qualityFromScore } from "../router/canary.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { COMMANDS, filterCommands, helpText, LIVE_SAFE } from "./commands.ts";
 import { Banner, Spinner, CommandMenu, ApprovalPrompt, StatusBar, AssistantBlock, TodoList } from "./components.tsx";
@@ -68,7 +67,6 @@ export interface AppProps {
   store: SessionStore;
   sessionId: string;
   cwd: string;
-  router: Router;
   profiles: ProfileStore;
   client: OpenRouterClient;
   config: PersojeConfig;
@@ -154,7 +152,6 @@ export function App({
   store,
   sessionId: initialSession,
   cwd,
-  router,
   profiles,
   client,
   config,
@@ -382,39 +379,12 @@ export function App({
     });
   }, [agent]);
 
-  // Router: guardrail failures feed escalation. "offer" suggests, "auto" switches.
-  useEffect(() => {
-    agent.setFailureSink((kind, model) => {
-      router.recordFailure(model, kind);
-      const esc = router.shouldEscalate(model);
-      if (!esc) return;
-
-      // Emit router event to the stream (for history rendering)
-      agent.deps?.onRouterEvent?.({
-        message: esc.reason,
-        target: esc.target,
-        mode: router.mode,
-        currentModel: model,
-      });
-
-      if (router.mode === "auto" && esc.target) {
-        agent.model = esc.target;
-        push({ kind: "info", text: `⇄ router: ${esc.reason} — auto-switched to ${esc.target}` });
-      } else {
-        push({
-          kind: "info",
-          text: `⇄ router: ${esc.reason}${esc.target ? ` — consider /model ${esc.target}` : " — consider a stronger model"}`,
-        });
-      }
-    });
-  }, [agent, router, push]);
-
   // Canary: first use of an unknown/variable model gets a 3-prompt smoke test;
   // the verdict persists to ~/.config/persoje/models.json and tunes strictness.
   const canaried = useRef(new Set<string>());
   const maybeCanary = useCallback(
     async (modelId: string, force = false) => {
-      if (!force && (!router.enabled || !config.router.canary || canaried.current.has(modelId))) return;
+      if (!force && canaried.current.has(modelId)) return;
       const profile = profiles.get(modelId);
       if (!force && (profile.canary || profile.toolQuality === "excellent" || profile.toolQuality === "good")) return;
       canaried.current.add(modelId);
@@ -433,29 +403,12 @@ export function App({
         push({ kind: "info", text: `canary failed: ${(e as Error).message}` });
       }
     },
-    [client, config, profiles, push, router],
+    [client, config, profiles, push],
   );
   useEffect(() => {
     void maybeCanary(agent.model);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Wire onRouterEvent: pre-canary the escalation target ONLY on an actual
-  // auto-switch. In "offer" mode the user hasn't adopted the model yet (/model
-  // canaries it when they switch), so we don't spend tokens probing a model
-  // they may never use. Dedup via the canaried Set; never canary the current model.
-  useEffect(() => {
-    agent.deps.onRouterEvent = async (event) => {
-      if (
-        event.mode === "auto" &&
-        event.target &&
-        event.target !== event.currentModel &&
-        !canaried.current.has(event.target)
-      ) {
-        void maybeCanary(event.target, false);
-      }
-    };
-  }, [agent, maybeCanary]);
 
   // Batch streaming deltas: flush at 80ms so Ink isn't re-rendering per token.
   useEffect(() => {
@@ -639,25 +592,14 @@ export function App({
         case "/model":
           if (rest[0]) {
             agent.model = rest[0];
-            push({ kind: "info", text: `model → ${rest[0]} (this session; /dmodel to make it the default)` });
+            push({ kind: "info", text: `model → ${rest[0]}` });
             void maybeCanary(rest[0]);
           } else {
+            // Show current model info in status
             const p = profiles.get(agent.model);
-            const canary = p.canary ? ` · canary ${p.canary.score}/${p.canary.total}` : " · not canaried";
+            const canary = p.canary ? ` · canary ${p.canary.score}/${p.canary.total}` : "";
             push({ kind: "info", text: `model: ${agent.model} (${p.toolQuality}${canary})` });
           }
-          break;
-        case "/dmodel":
-          if (!rest[0]) {
-            push({ kind: "info", text: `default model: ${config.model.primary} — usage: /dmodel <id> to change it for all new sessions` });
-            break;
-          }
-          agent.model = rest[0]; // apply now too
-          void setDefaultModel(rest[0]).then(
-            () => push({ kind: "info", text: `default model → ${rest[0]} (saved; used in every new session)` }),
-            (e) => push({ kind: "error", text: `couldn't save default: ${(e as Error).message}` }),
-          );
-          void maybeCanary(rest[0]);
           break;
         case "/recap":
           push({ kind: "info", text: "recapping…" });
@@ -714,7 +656,7 @@ export function App({
               push({
                 kind: "info",
                 text: lines.length
-                  ? `tool-capable models${filter ? ` matching "${filter}"` : ""} (cheapest first) — /dmodel <id> to set:\n${lines.join("\n")}`
+                  ? `tool-capable models${filter ? ` matching "${filter}"` : ""} (cheapest first):\n${lines.join("\n")}`
                   : `no tool-capable models matched "${filter}"`,
               });
             },
@@ -748,25 +690,6 @@ export function App({
             kind: "info",
             text: `↩ reverted ${restored.length} file(s) to HEAD${skipped.length ? `; left ${skipped.length} new/untracked (delete manually): ${skipped.join(", ")}` : ""}`,
           });
-          break;
-        }
-        case "/router": {
-          const apply = (v: string) => {
-            if (v === "on") router.enabled = true;
-            else if (v === "off") router.enabled = false;
-            else if (v === "auto" || v === "offer") router.mode = v;
-            push({ kind: "info", text: `router: ${router.enabled ? "on" : "off"} · mode: ${router.mode}` });
-          };
-          if (!rest[0]) {
-            openMenu("model routing", [
-              { label: "on", value: "on", hint: "routing & escalation" },
-              { label: "off", value: "off", hint: "pin current model" },
-              { label: "auto", value: "auto", hint: "escalate automatically" },
-              { label: "offer", value: "offer", hint: "ask before escalating" },
-            ], apply);
-            break;
-          }
-          apply(rest[0]);
           break;
         }
         case "/canary":
@@ -816,7 +739,6 @@ export function App({
             kind: "info",
             text: [
               `model      ${agent.model} (${p.toolQuality}${p.canary ? `, canary ${p.canary.score}/${p.canary.total}` : ""})`,
-              `router     ${router.enabled ? "on" : "off"} · ${router.mode} · ${router.failureCount(agent.model)} recent failures`,
               `session    ${sessionId} · ~${stats.totalTokens} tok (msgs) · ${stats.schemaTokens} tok (schemas) · ${fmtCost(t.cost)}`,
               `context    ${stats.totalMessages} msgs · ${stats.elidedCount} elided · ${stats.cacheBreakpoints} cache pts · prefix ${stats.prefixStable ? "stable ✓" : "dirty"}`,
               `memory     ${factCount} facts · ${lessons.recent(100).length} lessons · ${skills.list().length} skills`,
@@ -1429,7 +1351,6 @@ export function App({
                 version={VERSION}
                 model={agent.model}
                 cwd={cwd}
-                routerState={`${router.enabled ? "on" : "off"} (${router.mode})`}
                 sessionTitle={sessionTitle || undefined}
                 activeTheme={activeTheme}
               />
@@ -1591,7 +1512,6 @@ export function App({
               busy={busy}
               turnStart={busyStart}
               queued={queue.length}
-              routerOff={!router.enabled}
               iterations={turnIterations}
               toolsThisTurn={turnTools}
               cacheHit={agent.context.cacheHitRatio}

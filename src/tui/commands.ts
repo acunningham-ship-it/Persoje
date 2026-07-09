@@ -6,20 +6,18 @@ export interface CommandMeta {
 }
 
 export const COMMANDS: CommandMeta[] = [
-  { name: "/model", args: "[id]", desc: "show model + profile, or switch (this session only)" },
-  { name: "/dmodel", args: "<id>", desc: "set the default model (persists to config, all new sessions)" },
+  { name: "/model", args: "[id]", desc: "show or switch model (interactive menu)" },
   { name: "/models", args: "[filter]", desc: "list tool-capable models (price + context) to pick from" },
-  { name: "/provider", args: "[name]", desc: "pick a provider from a menu (openrouter, openai, anthropic, primer/custom), or switch by name" },
+  { name: "/provider", args: "[name]", desc: "pick a provider from a menu, or switch by name" },
   { name: "/recap", desc: "summarize the session so far — what's done, current state, next" },
   { name: "/retry", desc: "re-run the last task (e.g. after switching model)" },
   { name: "/copy", args: "[code]", desc: "copy last reply (or its last code block) to clipboard" },
   { name: "/diff", desc: "show uncommitted git changes (what changed this session)" },
   { name: "/undo", desc: "revert files the agent edited this session (git repo only)" },
-  { name: "/router", args: "on|off|auto|offer", desc: "toggle model routing & escalation" },
   { name: "/canary", desc: "re-run the 3-prompt smoke test on the current model" },
   { name: "/cost", desc: "session token + cost totals" },
   { name: "/budget", args: "[usd|off]", desc: "show or set the session cost ceiling (halts the turn when hit)" },
-  { name: "/status", desc: "model, session, memory, router — everything at a glance" },
+  { name: "/status", desc: "model, session, memory — everything at a glance" },
   { name: "/config", desc: "show resolved config" },
   { name: "/permissions", args: "[clear]", desc: "show or clear always-allowed tools" },
   { name: "/resume", args: "[name|number]", desc: "interactive session picker, or resume by name/number" },
@@ -37,8 +35,8 @@ export const COMMANDS: CommandMeta[] = [
   { name: "/repomap", desc: "show the repo-map being sent to the model" },
   { name: "/dream", desc: "consolidate recent sessions into memory (free model)" },
   { name: "/theme", args: "[name]", desc: "switch color theme (amber, ocean, forest, rose, mono)" },
-  { name: "/mcp", args: "add|remove|connect|list|tools", desc: "manage MCP servers (add, remove, connect, list, tools)" },
-  { name: "/personality", args: "show|set|reset|custom", desc: "personality wizard: tone, verbosity, work ethic, etc." },
+  { name: "/mcp", args: "add|remove|connect|list|tools", desc: "manage MCP servers" },
+  { name: "/personality", args: "show|set|reset|custom", desc: "personality wizard" },
   { name: "/plan", args: "[on|off]", desc: "plan mode: think & spec before acting" },
   { name: "/autonomous", args: "on|off|status", desc: "toggle persistent mode (survives disconnect)" },
   { name: "/permsoff", desc: "auto-approve all tool calls (no confirmation)" },
@@ -54,7 +52,7 @@ export const COMMANDS: CommandMeta[] = [
 export const LIVE_SAFE = new Set<string>([
   "/help", "/cost", "/budget", "/status", "/config", "/permissions", "/sessions",
   "/memory", "/skills", "/lessons", "/quirks", "/repomap", "/stats",
-  "/diff", "/copy", "/models", "/theme", "/router", "/goal",
+  "/diff", "/copy", "/models", "/theme", "/goal",
   "/exit", "/quit",
 ]);
 

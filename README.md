@@ -15,14 +15,15 @@ The premise: **a good harness makes a cheap model punch above its weight.** Heav
 ```
 ❯ fix the failing test in calc.py
 
-◇ read(calc.py)        ⎿ 13 lines · 3ms
-✎ edit(calc.py)        ⎿ 1 replacement
-▸ bash(python3 calc.py) ⎿ all tests pass · 27ms
+◇ read(calc.py)         13 lines · 3ms
+✎ edit(calc.py)         1 replacement
+▸ bash python3 calc.py  all tests pass · 27ms
 
-╭─ ✦ persoje ──────────────────────────────────────────╮
-  Fixed — average() divided by len+1 instead of len.
-╰────────────────────────────────────────────────────────╯
- ⬡ owl-alpha │ 1.3K/1M [░░░░░░░░░░] 0% │ $0.00 │ ⏱ 4s
+persoje v0.4.0 · openrouter/owl-alpha · ~/project
+ Fixed — average() divided by len+1 instead of len.
+
+owl-alpha [██░░░░░░░░] 20% $0.00 ⏱ 4s
+▸ task, or / for commands ▌
 ```
 
 ▶ **Demo:** [`docs/demo.cast`](docs/demo.cast) — a real recorded session (`asciinema play docs/demo.cast`). The run above is verbatim from it: read → run → diagnose → fix → verify, ~5 calls, $0.
@@ -74,8 +75,10 @@ Token discipline is enforced *before* anything reaches the model:
 | **Search/replace edits** | The model emits only the changed lines, never whole files. |
 | **Prompt caching** | Stable prompt prefix + `cache_control` breakpoints where the provider supports them. |
 | **Web research** | `web_search` (keyless, via DuckDuckGo) and `web_fetch` let the agent look up docs/APIs instead of guessing — HTML is stripped to lean markdown *before* it reaches the model, and the result is token-capped like any tool. |
-| **Sub-agents** | The `task` tool delegates to an isolated-context worker; only a capped summary returns to the parent. |
-| **Live accounting** | Real per-call cost from OpenRouter, shown in the status gauge against the model's true context window. |
+| **Sub-agents** | The `task` tool delegates to an isolated-context worker; only a capped summary returns to the parent. Sub-agent costs roll up into the parent session's total. |
+| **RTK (Real Token Kounter)** | Code-aware token estimation (3.5 tok/char for code, 4.5 for prose) gives accurate context accounting — no more 4-char fixed guess. |
+| **Headroom** | A configurable % buffer (default 20%) keeps context below the limit, preventing mid-turn overflow that causes retries. |
+| **Live accounting** | Real per-call cost from OpenRouter, shown in the status bar. Sub-agent costs are automatically rolled into parent totals. |
 
 ## Performance Profile
 
@@ -142,12 +145,14 @@ On launch (throttled to once every 4 hours, clean working tree only) Persoje fet
 
 ```
 /model [id]        show model + profile, or switch
+/dmodel [id]       set the default model (persists to config)
+/models [filter]   list tool-capable models with pricing
+/provider [name]   pick or switch provider (openrouter, openai, anthropic, custom)
 /router on|off|auto|offer   model routing & escalation
 /canary            re-run the smoke test on the current model
 /goal [text|clear] show, set, or clear the pinned session goal
 /plan [on|off]     plan mode — spec before acting
-/effort low|mid|high|max    reasoning depth
-/cost              session token + cost totals
+/cost              session token + cost totals (includes subagents)
 /budget [usd|off]  cost ceiling — halts the turn when reached
 /status            model, session, memory, router at a glance
 /config            show resolved config
@@ -161,9 +166,17 @@ On launch (throttled to once every 4 hours, clean working tree only) Persoje fet
 /memory [slug]     list memory facts, or show one
 /skills            list skills in the library
 /lessons           recent lessons from failed turns
+/stats             self-improvement scoreboard
 /quirks            known quirks of the current model
 /repomap           show the repo-map sent to the model
 /dream             consolidate recent sessions into memory
+/recap             session summary
+/retry             re-run the last task
+/copy [code]       copy last reply to clipboard
+/diff              show uncommitted git changes
+/undo              revert files the agent edited
+/good [note]       mark the last turn as positive signal
+/bad [why]         mark the last turn as wrong — creates a lesson
 /mcp add|remove|connect|list|tools    manage MCP servers
 /personality show|set|reset|custom    tone, verbosity, work ethic
 /theme [name]      amber · ocean · forest · rose · mono
@@ -176,13 +189,13 @@ On launch (throttled to once every 4 hours, clean working tree only) Persoje fet
 
 ```jsonc
 {
-  "model": { "primary": "openrouter/owl-alpha", "fallbacks": [], "compactor": "" },
-  "context": { "budgetTokens": 40000, "repoMapTokens": 800, "cacheSystemPrompt": true },
-  "loop": { "maxIterations": 0 },          // 0 = unlimited (circuit breaker still stops dead loops)
-  "router": { "enabled": true, "mode": "offer", "canary": true },
+  "model": { "primary": "openrouter/owl-alpha", "subagent": "", "compactor": "", "fallbacks": [] },
+  "context": { "budgetTokens": 40000, "repoMapTokens": 800, "cacheSystemPrompt": true, "headroom": 20, "accurateEstimates": true },
+  "loop": { "maxIterations": 0, "stuckLimit": 10, "bashTimeoutMs": 60000, "maxCostUsd": 0 },
+  "router": { "enabled": true, "mode": "offer", "canary": true, "failureThreshold": 3 },
   "memory": { "enabled": true, "budgetTokens": 1200, "dreamModel": "" },
-  "effort": { "level": "mid" },
-  "openrouter": { "provider": { "order": ["..."] } }   // optional provider pinning
+  "openrouter": { "provider": { "order": ["..."] } },
+  "providers": { "openrouter": { "type": "openai-compat", "baseUrl": "https://openrouter.ai/api/v1" } }
 }
 ```
 
