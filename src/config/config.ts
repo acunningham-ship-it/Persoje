@@ -27,7 +27,7 @@ const ConfigSchema = z.object({
       /** Turns kept at full fidelity during compaction. */
       keepFullTurns: z.number().default(10),
       /** Repo-map token budget; 0 disables. */
-      repoMapTokens: z.number().default(800),
+      repoMapTokens: z.number().default(400),
       /** Attach a cache_control breakpoint to the system prompt (providers without caching ignore it). */
       cacheSystemPrompt: z.boolean().default(true),
       /** Min % of context budget kept free as headroom (0-50). E.g. 20 = compact to 80% at most. */

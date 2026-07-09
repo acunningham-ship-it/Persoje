@@ -85,12 +85,12 @@ export class SkillLibrary {
       .join("\n");
   }
 
-  /** Get a compact skill summary for system prompt injection (names + 1-line desc only). */
+  /** Get a compact skill summary for system prompt injection (top 3 by useCount, names + 1-line desc). */
   summaryForPrompt(): string {
     const skills = this.list();
     if (skills.length === 0) return "";
-    const lines = skills.map((s) => `${s.name}: ${s.description}`);
-    return `Available skills (invoke with /name or let the agent choose):\n${lines.join("\n")}`;
+    const top = skills.sort((a, b) => b.useCount - a.useCount).slice(0, 3);
+    return `Skills: ${top.map((s) => `${s.name}: ${s.description}`).join(" · ")}`;
   }
 
   /** Load a skill's full content (lazy — only when invoked). */
