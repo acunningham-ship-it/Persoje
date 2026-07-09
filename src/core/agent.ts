@@ -258,16 +258,16 @@ export class Agent {
         }
         primerMode = this.primerModeCache;
 
-        // Token discipline: compact before the call once history crosses the
-        // threshold; inside a single long turn, fall back to eliding old tool results.
-        if (this.context.needsCompaction()) {
-          let result: { before: number; after: number } | null = null;
-          if (primerMode) {
-            result = await this.compactForPrimer().catch(() => null);
-          } else {
-            result = await this.compact().catch(() => null);
-          }
-          result ??= this.context.elideOldToolResults();
+        // Do not summarize automatically between tool calls. Rewriting the
+        // conversation in the middle of a turn changes the model's working
+        // context and has caused degraded reasoning / tool-call loops.
+        //
+        // Keep the full transcript by default. Only use the non-semantic,
+        // reversible tool-output elision as an emergency when the hard budget
+        // is actually exceeded. Summarization remains available explicitly via
+        // the /compact command (agent.compact()).
+        if (this.context.effectiveTokens() > config.context.budgetTokens) {
+          const result = this.context.elideOldToolResults();
           if (result) yield { type: "compaction", beforeTokens: result.before, afterTokens: result.after };
         }
 

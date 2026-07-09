@@ -138,11 +138,14 @@ export class ContextManager {
    * Messages are sent in order, with smart elision of old tool results.
    */
   build(systemPrompt: string): ChatMessage[] {
-    const { messages: elided, elidedCount } = this.elideByPriority();
-    const result: ChatMessage[] = [{ role: "system", content: systemPrompt }, ...elided];
+    // Preserve the complete transcript during normal turns. Automatic priority
+    // elision at 60% of budget rewrites tool evidence before the model needs it
+    // and can destabilize tool-use loops. The agent loop has a hard-budget,
+    // emergency-only fallback for genuinely oversized contexts.
+    const result: ChatMessage[] = [{ role: "system", content: systemPrompt }, ...this.messages];
     this.lastBuildTokens = result.reduce((sum, m) => sum + this.estimate(m.content ?? ""), 0);
     this.lastBuildMessageCount = result.length;
-    this.lastElidedCount = elidedCount;
+    this.lastElidedCount = 0;
     this.lastCacheBreakpoints = 0;
 
     // Record the hash of the current prefix for stability detection
@@ -484,24 +487,12 @@ export class ContextManager {
     return this.lastInputTokens + growth;
   }
 
-  /**
-   * Adaptive compaction check: instead of a fixed threshold, we consider
-   * context velocity. If context is growing fast (deep agentic loop),
-   * compact earlier to avoid running out of room mid-turn.
-   */
+  /** Advisory only: the agent loop deliberately does not call this as an
+   * automatic summarization trigger. Kept for status displays and callers
+   * that want to offer an explicit compaction prompt. */
   needsCompaction(): boolean {
-    const headroomRatio = this.headroom / 100;
-    const effectiveBudget = this.budgetTokens * (1 - headroomRatio);
     const used = this.effectiveTokens();
-    const ratio = used / effectiveBudget;
-
-    const delta = used - this.lastBuildTokens;
-    this.velocity = this.velocity * 0.7 + Math.max(0, delta) * 0.3;
-
-    const velocityRatio = this.velocity / effectiveBudget;
-    const dynamicThreshold = velocityRatio > 0.05 ? 0.6 : this.compactionThreshold;
-    if (ratio > dynamicThreshold) return true;
-
+    if (used > this.budgetTokens) return true;
     if (this.cachingWell()) return false;
     const userTurns = this.messages.filter(
       (m) => m.role === "user" && !m.content.startsWith("[Summary of earlier conversation]"),
