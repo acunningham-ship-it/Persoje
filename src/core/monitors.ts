@@ -105,8 +105,8 @@ export class MonitorManager {
       lastExitCode: null,
     };
     if (existing >= 0) {
-      // Preserve fire history across config updates
-      const old = this.monitors[existing];
+      // Preserve fire history across config updates (existing >= 0 ⇒ defined)
+      const old = this.monitors[existing]!;
       state.fireCount = old.fireCount;
       state.lastFired = old.lastFired;
       this.monitors[existing] = state;

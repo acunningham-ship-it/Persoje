@@ -10,9 +10,16 @@ const cfg = (activeProvider: string, providers: Record<string, any> = {}): Perso
 describe("provider menu", () => {
   it("always offers the built-in presets + a custom/primer slot", () => {
     const items = buildProviderMenu(cfg("openrouter"));
-    // 3 presets, then the custom slot
-    expect(items.slice(0, 3).map((i: any) => i.preset.name)).toEqual(["openrouter", "openai", "anthropic"]);
+    // the built-in presets, in order, then the custom slot
+    expect(items.slice(0, 4).map((i: any) => i.preset.name)).toEqual(["openrouter", "freebee", "openai", "anthropic"]);
     expect(items.at(-1)!.kind).toBe("custom");
+  });
+
+  it("freebee is an OpenRouter-family preset pinned to the free auto-router", () => {
+    const freebee = BUILTIN_PROVIDERS.find((p) => p.name === "freebee")!;
+    expect(freebee.baseUrl).toBe("https://openrouter.ai/api/v1");
+    expect(freebee.defaultModel).toBe("openrouter/free"); // auto-routes to any live free model
+    expect(freebee.apiKeyEnv).toBe("OPENROUTER_API_KEY"); // reuses the OpenRouter key
   });
 
   it("marks the active provider with a check", () => {

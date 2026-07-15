@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { Agent } from "./core/agent.ts";
 import { loadConfig, resolveApiKey, resolveProvider, GLOBAL_CONFIG_DIR, GLOBAL_CONFIG_PATH } from "./config/config.ts";
+import { BUILTIN_PROVIDERS } from "./config/providers.ts";
+import { extractPositional } from "./cli-args.ts";
 import { OpenRouterClient } from "./models/openrouter.ts";
 import { ToolRegistry } from "./tools/types.ts";
 import { readTool, writeTool, editTool, multiEditTool, lsTool, globTool } from "./tools/file-tools.ts";
@@ -231,6 +233,9 @@ ${chalk.bold("Persoje")} v${VERSION} — token-efficient agentic CLI
   --no-update   skip auto-update check
   -p, --print   headless print mode (no TUI, no auto-update, no wizard)
   --json        with -p: emit a JSON result object instead of plain text
+  --model <id>       override the primary model for this run
+  --provider <name>  override the active provider for this run
+  --preset <name>    apply a provider preset (freebee = free models, $0)
   ctrl+c during a turn cancels it.
 `);
 }
@@ -295,6 +300,24 @@ async function main(): Promise<void> {
   // --provider flag overrides config
   const providerIdx = args.indexOf("--provider");
   if (providerIdx !== -1 && args[providerIdx + 1]) config.activeProvider = args[providerIdx + 1]!;
+  // --preset flag applies a built-in provider preset non-interactively (the CLI twin of the
+  // `/provider` menu), e.g. `--preset freebee` = OpenRouter + a free model. openrouter-family
+  // presets keep the synthesized openrouter provider (attribution headers/routing) and just pin
+  // the model; other endpoints materialize so resolveProvider picks up their baseUrl/key.
+  const presetIdx = args.indexOf("--preset");
+  if (presetIdx !== -1 && args[presetIdx + 1]) {
+    const wanted = args[presetIdx + 1]!;
+    const preset = BUILTIN_PROVIDERS.find((p) => p.name === wanted);
+    if (!preset) {
+      console.error(`unknown preset "${wanted}" — options: ${BUILTIN_PROVIDERS.map((p) => p.name).join(", ")}`);
+      process.exit(1);
+    }
+    if (preset.defaultModel) config.model.primary = preset.defaultModel;
+    if (preset.baseUrl !== "https://openrouter.ai/api/v1") {
+      config.activeProvider = preset.name;
+      config.providers = { ...config.providers, [preset.name]: { type: "openai-compat", baseUrl: preset.baseUrl, apiKeyEnv: preset.apiKeyEnv, model: preset.defaultModel } };
+    }
+  }
 
   const provider = resolveProvider(config);
   const client = new OpenRouterClient(provider.apiKey, provider.baseUrl, provider.extraHeaders);
@@ -321,6 +344,19 @@ async function main(): Promise<void> {
 
   const [repoMap] = await Promise.all([repoMapP, projectGuideP]);
   await mcpReadyP; // MCP tools must be connected before we build the registry
+
+  // Clamp the self-imposed context budget to the active model's real window (× 0.8 leaves
+  // headroom for the system prompt, tools, repo-map + response). A large default is right for
+  // a 1M-window model like owl-alpha but must never exceed a smaller model's window. The
+  // window list is disk-cached (24h), so this is ~free.
+  try {
+    const win = (await client.modelContextWindows()).get(config.model.primary);
+    if (win && win > 0) {
+      config.context.budgetTokens = Math.min(config.context.budgetTokens, Math.floor(win * 0.8));
+    }
+  } catch {
+    // window unknown — keep the configured budget
+  }
 
   const tools = buildRegistry(skills, mcp);
   const agent = new Agent({ client, tools, config, cwd, repoMap, skills });
@@ -355,8 +391,7 @@ async function main(): Promise<void> {
   }
 
   // One-shot mode: persoje "do the thing" (no persistence, auto-approve)
-  const flagsWithValue = new Set(["--model", "--resume"]);
-  const positional = args.filter((a, i) => !a.startsWith("-") && !flagsWithValue.has(args[i - 1] ?? ""));
+  const positional = extractPositional(args);
 
   // Print/headless mode: prompt from args or piped stdin, only the final result
   // on stdout (clean for `persoje -p "..." | pbcopy` or `… | persoje -p`).
