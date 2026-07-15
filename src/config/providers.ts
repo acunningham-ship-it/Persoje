@@ -30,10 +30,11 @@ export const PRIMER_PROVIDER = "primer";
 
 export const BUILTIN_PROVIDERS: ProviderPreset[] = [
   { name: "openrouter", label: "OpenRouter — default · every model", baseUrl: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENROUTER_API_KEY" },
-  // freebee = OpenRouter pinned to its free auto-router. `openrouter/free` picks whatever free
-  // model is available, so a single model's rate-limit doesn't stall the session. $0, still needs
-  // OPENROUTER_API_KEY. The lean-harness dogfood target: prove the harness on a free model.
-  { name: "freebee", label: "Freebee — free models, $0 (OpenRouter free auto-router)", baseUrl: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENROUTER_API_KEY", defaultModel: "openrouter/free" },
+  // freebee = Armani's OpenRouter *Preset* (`@preset/freebee`, configured on the OpenRouter
+  // dashboard: a curated free-model fallback chain + system prompt + params). OpenRouter resolves
+  // the `@preset/<slug>` model id server-side, so a single free model's rate-limit rolls to the
+  // next. $0, reuses OPENROUTER_API_KEY. The lean-harness dogfood target: prove it on free models.
+  { name: "freebee", label: "Freebee — free models, $0 (@preset/freebee)", baseUrl: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENROUTER_API_KEY", defaultModel: "@preset/freebee" },
   { name: "openai", label: "OpenAI API — GPT / o-series (codex)", baseUrl: "https://api.openai.com/v1", apiKeyEnv: "OPENAI_API_KEY", defaultModel: "gpt-4o" },
   { name: "anthropic", label: "Anthropic API — Claude (OpenAI-compat)", baseUrl: "https://api.anthropic.com/v1", apiKeyEnv: "ANTHROPIC_API_KEY", defaultModel: "claude-sonnet-4-20250514" },
 ];

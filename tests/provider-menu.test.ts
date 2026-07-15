@@ -15,10 +15,10 @@ describe("provider menu", () => {
     expect(items.at(-1)!.kind).toBe("custom");
   });
 
-  it("freebee is an OpenRouter-family preset pinned to the free auto-router", () => {
+  it("freebee is an OpenRouter-family preset pinned to the @preset/freebee dashboard preset", () => {
     const freebee = BUILTIN_PROVIDERS.find((p) => p.name === "freebee")!;
     expect(freebee.baseUrl).toBe("https://openrouter.ai/api/v1");
-    expect(freebee.defaultModel).toBe("openrouter/free"); // auto-routes to any live free model
+    expect(freebee.defaultModel).toBe("@preset/freebee"); // Armani's curated free-model fallback preset
     expect(freebee.apiKeyEnv).toBe("OPENROUTER_API_KEY"); // reuses the OpenRouter key
   });
 
