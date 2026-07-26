@@ -59,7 +59,7 @@ function rmDanger(cmd: string, cwd: string): string | null {
   return null;
 }
 
-/** Writes/edits to secrets, shell configs, or anywhere outside the project. */
+/** Any path-taking tool aiming at secrets, shell configs, or outside the project. */
 function pathDanger(p: string, cwd: string): string | null {
   if (!p) return null;
   const home = homedir();
@@ -73,6 +73,13 @@ function pathDanger(p: string, cwd: string): string | null {
   return null;
 }
 
+/**
+ * Every tool that resolves a caller-supplied path against cwd. Reads belong here
+ * as much as writes: `read`/`ls`/`glob`/`grep` all take a path straight from the
+ * model, and exfiltrating ~/.ssh/id_ed25519 needs no write at all.
+ */
+const PATH_TOOLS = new Set(["write", "edit", "multi_edit", "read", "ls", "glob", "grep"]);
+
 export function assessDanger(name: string, args: Record<string, unknown>, cwd: string): DangerVerdict {
   if (name === "bash") {
     const cmd = String(args.command ?? "");
@@ -81,7 +88,7 @@ export function assessDanger(name: string, args: Record<string, unknown>, cwd: s
     for (const [re, reason] of BASH_PATTERNS) if (re.test(cmd)) return { dangerous: true, reason };
     return SAFE;
   }
-  if (name === "write" || name === "edit" || name === "multi_edit") {
+  if (PATH_TOOLS.has(name)) {
     const pd = pathDanger(String(args.path ?? ""), cwd);
     if (pd) return { dangerous: true, reason: pd };
   }

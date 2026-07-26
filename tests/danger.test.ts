@@ -56,7 +56,28 @@ test("allows normal project writes", () => {
   expect(write(".persoje/PERSOJE.md").dangerous).toBe(false);
 });
 
-test("read-only tools are never dangerous", () => {
-  expect(assessDanger("read", { path: "~/.ssh/id_rsa" }, CWD).dangerous).toBe(false);
+// Reads were previously exempt on the theory that read-only == harmless. That holds
+// for destruction, not for disclosure: with web_fetch in the same toolbox, `read
+// ~/.ssh/id_ed25519` is a complete exfiltration chain and needs no write at all.
+// Containment is judged on the path, not on whether the tool mutates.
+test("flags reads of secrets / outside the project", () => {
+  expect(assessDanger("read", { path: "~/.ssh/id_rsa" }, CWD).dangerous).toBe(true);
+  expect(assessDanger("read", { path: "~/.ssh/id_ed25519" }, CWD).dangerous).toBe(true);
+  expect(assessDanger("read", { path: "../../.env" }, CWD).dangerous).toBe(true);
+  expect(assessDanger("read", { path: "/etc/shadow" }, CWD).dangerous).toBe(true);
+  expect(assessDanger("read", { path: "/home/u/other/notes.md" }, CWD).dangerous).toBe(true);
+  expect(assessDanger("grep", { pattern: "PRIVATE KEY", path: "~/.ssh" }, CWD).dangerous).toBe(true);
+  expect(assessDanger("ls", { path: "~/.aws" }, CWD).dangerous).toBe(true);
+  expect(assessDanger("glob", { pattern: "**/*.pem", path: "/home/u" }, CWD).dangerous).toBe(true);
+});
+
+test("normal in-project reads stay frictionless", () => {
+  expect(assessDanger("read", { path: "src/index.ts" }, CWD).dangerous).toBe(false);
+  expect(assessDanger("read", { path: "./README.md" }, CWD).dangerous).toBe(false);
+  expect(assessDanger("read", { path: "/home/u/project/src/a.ts" }, CWD).dangerous).toBe(false);
+  expect(assessDanger("ls", { path: "src" }, CWD).dangerous).toBe(false);
+  // No path arg at all => defaults to cwd => never flagged.
   expect(assessDanger("grep", { pattern: "x" }, CWD).dangerous).toBe(false);
+  expect(assessDanger("ls", {}, CWD).dangerous).toBe(false);
+  expect(assessDanger("glob", { pattern: "**/*.ts" }, CWD).dangerous).toBe(false);
 });

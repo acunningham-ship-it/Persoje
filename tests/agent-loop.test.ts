@@ -239,11 +239,15 @@ test("max iterations stops a tool-calling loop", async () => {
 });
 
 test("rescues tool calls embedded in text (Hermes-style) and executes them", async () => {
+  // In-cwd fixture on purpose: the danger guard flags reads outside the project,
+  // so a /etc path here would test path policy instead of the rescue path.
+  const dir = mkdtempSync(join(tmpdir(), "persoje-rescue-"));
+  await Bun.write(join(dir, "hostname.txt"), "ac-ham\n");
   const registry = new ToolRegistry();
   registry.register(readTool);
   const client = fakeClient([
     [
-      { type: "text", delta: 'Let me read that.\n<tool_call>{"name": "read", "arguments": {"path": "/etc/hostname"}}</tool_call>' },
+      { type: "text", delta: 'Let me read that.\n<tool_call>{"name": "read", "arguments": {"path": "hostname.txt"}}</tool_call>' },
       usage,
     ],
     [{ type: "text", delta: "Got it." }, usage],
@@ -253,7 +257,7 @@ test("rescues tool calls embedded in text (Hermes-style) and executes them", asy
     client,
     tools: registry,
     config: makeConfig(),
-    cwd: "/tmp",
+    cwd: dir,
     onFailure: (kind) => failures.push(kind),
   });
   const events = await collect(agent.run("read hostname"));
@@ -267,11 +271,14 @@ test("rescues tool calls embedded in text (Hermes-style) and executes them", asy
 test("fuzzy-corrects hallucinated tool names (read_file → read)", async () => {
   const registry = new ToolRegistry();
   registry.register(readTool);
+  // In-cwd fixture on purpose — see the rescue test above.
+  const dir = mkdtempSync(join(tmpdir(), "persoje-fuzzy-"));
+  await Bun.write(join(dir, "hostname.txt"), "ac-ham\n");
   const client = fakeClient([
-    [{ type: "tool-calls", calls: [{ id: "c1", name: "read_file", argsJson: '{"path":"/etc/hostname"}' }] }, usage],
+    [{ type: "tool-calls", calls: [{ id: "c1", name: "read_file", argsJson: '{"path":"hostname.txt"}' }] }, usage],
     [{ type: "text", delta: "done" }, usage],
   ]);
-  const agent = new Agent({ client, tools: registry, config: makeConfig(), cwd: "/tmp" });
+  const agent = new Agent({ client, tools: registry, config: makeConfig(), cwd: dir });
   const events = await collect(agent.run("go"));
 
   const fuzzy = events.find((e) => e.type === "guardrail" && (e as any).kind === "fuzzy") as any;
