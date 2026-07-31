@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { truncate } from "../tools/truncate.ts";
 import type { Agent } from "../core/agent.ts";
 import { summarizeToolArgs } from "../core/tool-summary.ts";
+import { isCompletedLine, completedLineText, stripPasteMarkers } from "../core/input-chunk.ts";
 import type { SessionStore } from "../session/store.ts";
 import type { ProfileStore } from "../router/router.ts";
 import { OpenRouterClient } from "../models/openrouter.ts";
@@ -1275,9 +1276,23 @@ export function App({
       // Strip bracketed-paste markers. A chunk that still contains newlines is a
       // multi-line paste — insert it whole (preserving the newlines) rather than
       // submitting line-by-line, which used to mangle pasted code.
-      const cleaned = char.replace(/\x1b\[20[01]~/g, "");
+      const cleaned = stripPasteMarkers(char);
       if (!cleaned) return;
+      // A chunk whose ONLY newline is at the very end is a finished line, not a multi-line
+      // paste: the terminal coalesced the text and the Enter into one write. Ink reports
+      // that as char="text\r" with key.return FALSE, so the return branch above never runs
+      // and the text just sat in the input — measured against a real terminal, and it is
+      // what a user pasting a single line sees. Submit it.
+      if (isCompletedLine(cleaned)) {
+        const line = completedLineText(cleaned);
+        setInput("");
+        setMenuSelected(0);
+        submit(input + line);
+        return;
+      }
       if (cleaned.includes("\n") || cleaned.includes("\r")) {
+        // Interior newlines = a genuine multi-line paste. Insert whole and do NOT submit,
+        // or pasted code gets mangled line-by-line (the reason this branch exists).
         setInput((v) => v + cleaned.replace(/\r\n?/g, "\n"));
       } else {
         setInput((v) => v + cleaned);
