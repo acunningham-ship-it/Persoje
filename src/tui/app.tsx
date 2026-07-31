@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { truncate } from "../tools/truncate.ts";
 import type { Agent } from "../core/agent.ts";
+import { summarizeToolArgs } from "../core/tool-summary.ts";
 import type { SessionStore } from "../session/store.ts";
 import type { ProfileStore } from "../router/router.ts";
 import { OpenRouterClient } from "../models/openrouter.ts";
@@ -94,29 +95,12 @@ function timeAgo(ts: number): string {
 
 /** One-glance argument summary per tool — what Claude Code shows in its ⏺ lines. */
 function compactArgs(name: string, args: Record<string, unknown>): string {
-  const clip = (s: unknown, n = 60) => {
-    const str = String(s ?? "");
-    return str.length > n ? str.slice(0, n) + "…" : str;
-  };
-  switch (name) {
-    case "read":
-      return clip(args.path) + (args.offset ? `:${args.offset}` : "");
-    case "edit":
-    case "write":
-      return clip(args.path);
-    case "bash":
-      return clip(args.command, 70);
-    case "grep":
-      return clip(args.pattern, 40) + (args.path ? ` in ${clip(args.path, 25)}` : "");
-    case "glob":
-      return clip(args.pattern, 50);
-    case "ls":
-      return clip(args.path ?? ".");
-    case "task":
-      return clip(args.task, 70);
-    default:
-      return clip(JSON.stringify(args), 60);
-  }
+  // Delegates to the shared core formatter. This function used to be a SECOND per-tool
+  // switch that duplicated it and drifted: its default dumped `JSON.stringify(args)`, and
+  // it read `args.task` where the other read `args.description`. Two summarizers is how a
+  // fix lands in one UI and not the other — which is exactly what happened when the
+  // one-shot path was fixed and the TUI (the default surface) was left behind.
+  return summarizeToolArgs(name, args);
 }
 
 let nextId = 1;

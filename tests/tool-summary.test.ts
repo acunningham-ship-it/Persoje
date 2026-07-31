@@ -69,3 +69,19 @@ describe("summarizeToolArgs", () => {
     expect(formatToolCall("read", { path: "a.ts" })).toBe("read a.ts");
   });
 });
+
+describe("shared by BOTH UIs (the dedup the module exists for)", () => {
+  test("task accepts either key — the TUI read `task`, the REPL read `description`", () => {
+    expect(summarizeToolArgs("task", { description: "audit the repo" })).toBe("audit the repo");
+    expect(summarizeToolArgs("task", { task: "audit the repo" })).toBe("audit the repo");
+  });
+
+  test("the unknown-tool fallback the Ink TUI now uses emits no JSON", () => {
+    // components.tsx used to render JSON.stringify(args).slice(0,200) here, which pasted
+    // any text payload straight into the card.
+    const out = summarizeToolArgs("mcp_some_tool", { query: "hello", blob: { deep: [1, 2, 3] } });
+    expect(out).toBe("hello");
+    expect(out).not.toContain("{");
+    expect(out).not.toContain("[");
+  });
+});

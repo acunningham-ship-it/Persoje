@@ -84,8 +84,13 @@ export function summarizeToolArgs(name: string, args: Args): string {
         return str(a.url) ? oneLine(str(a.url)!, 56) : "";
       case "web_search":
         return str(a.query) ? `"${oneLine(str(a.query)!, 44)}"` : "";
-      case "task":
-        return str(a.description) ? oneLine(str(a.description)!, 52) : "";
+      case "task": {
+        // The TUI's own summarizer read `task`, this one read `description`. Neither was
+        // wrong — the key has varied — so accept both rather than silently rendering
+        // nothing for whichever spelling the caller happens to use.
+        const t = str(a.description) ?? str(a.task) ?? str(a.prompt);
+        return t ? oneLine(t, 52) : "";
+      }
       default: {
         // Unknown tool: fall back to the most identifying scalar rather than the whole
         // object. A nested blob tells the reader nothing at a glance.

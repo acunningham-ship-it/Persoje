@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
+import { summarizeToolArgs } from "../core/tool-summary.ts";
 import type { CommandMeta } from "./commands.ts";
 import type { TodoItem } from "../tools/types.ts";
 import { theme, getTheme, type Theme } from "./theme.ts";
@@ -215,7 +216,13 @@ export function ApprovalPrompt({
       </Box>
     );
   } else {
-    body = <Text>{JSON.stringify(args).slice(0, 200)}</Text>;
+    // Unknown tool. This used to dump `JSON.stringify(args).slice(0, 200)` — a nested
+    // blob that tells the reader nothing at a glance, and for any tool carrying a text
+    // payload it pasted that payload straight into the card. The shared formatter picks
+    // the most identifying scalar instead. read/write/edit keep their richer renderers
+    // above; this replaces only the fallback.
+    const summary = summarizeToolArgs(name, args);
+    body = <Text>{summary || "no arguments"}</Text>;
   }
 
   return (
