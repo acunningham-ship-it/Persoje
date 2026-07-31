@@ -10,7 +10,7 @@ import type { ProfileStore } from "../router/router.ts";
 import { OpenRouterClient } from "../models/openrouter.ts";
 import type { PersojeConfig } from "../config/config.ts";
 import { setConfigValue, setActiveProvider, resolveProvider, saveProvider } from "../config/config.ts";
-import { BUILTIN_PROVIDERS, buildProviderMenu, presetHasKey, PRIMER_PROVIDER, type ProviderMenuItem, type ProviderPreset } from "../config/providers.ts";
+import { BUILTIN_PROVIDERS, buildProviderMenu, firstLocalModel, presetHasKey, PRIMER_PROVIDER, type ProviderMenuItem, type ProviderPreset } from "../config/providers.ts";
 import type { FactStore } from "../memory/facts.ts";
 import type { SkillLibrary } from "../memory/skills.ts";
 import { renderMarkdown } from "./markdown.ts";
@@ -297,6 +297,15 @@ export function App({
     if (item.kind === "existing") { setProvFlow(null); switchProvider(item.name); return; }
     const p = item.preset;
     if (p.name === "openrouter") { setProvFlow(null); switchProvider("openrouter"); return; } // legacy block resolves
+    if (p.keyless) {
+      // Local endpoint (Ollama): no key to prompt for. Auto-pick a pulled tool-capable model
+      // so the first message isn't sent with an OpenRouter-style id the local server 404s on.
+      setProvFlow(null);
+      void firstLocalModel(p.baseUrl).then((m) =>
+        materializeAndSwitch(p.name, { baseUrl: p.baseUrl, apiKey: "local", model: m ?? p.defaultModel }),
+      );
+      return;
+    }
     if (presetHasKey(config, p)) {
       setProvFlow(null);
       materializeAndSwitch(p.name, { baseUrl: p.baseUrl, apiKeyEnv: p.apiKeyEnv, model: p.defaultModel });

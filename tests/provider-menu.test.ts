@@ -11,8 +11,17 @@ describe("provider menu", () => {
   it("always offers the built-in presets + a custom/primer slot", () => {
     const items = buildProviderMenu(cfg("openrouter"));
     // the built-in presets, in order, then the custom slot
-    expect(items.slice(0, 4).map((i: any) => i.preset.name)).toEqual(["openrouter", "freebee", "openai", "anthropic"]);
+    expect(items.slice(0, 5).map((i: any) => i.preset.name)).toEqual(["openrouter", "freebee", "ollama", "openai", "anthropic"]);
     expect(items.at(-1)!.kind).toBe("custom");
+  });
+
+  it("ollama is a keyless local preset — offered without a key prompt", () => {
+    const ollama = BUILTIN_PROVIDERS.find((p) => p.name === "ollama")!;
+    expect(ollama.keyless).toBe(true);
+    expect(ollama.baseUrl).toBe("http://localhost:11434/v1");
+    expect(ollama.apiKeyEnv).toBeUndefined();
+    // keyless ⇒ always "has a key", so the menu materializes + switches without prompting
+    expect(presetHasKey(cfg("openrouter"), ollama)).toBe(true);
   });
 
   it("freebee is an OpenRouter-family preset pinned to the @preset/freebee dashboard preset", () => {

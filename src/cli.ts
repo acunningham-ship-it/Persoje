@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { Agent } from "./core/agent.ts";
 import { formatToolCall } from "./core/tool-summary.ts";
 import { loadConfig, resolveApiKey, resolveProvider, GLOBAL_CONFIG_DIR, GLOBAL_CONFIG_PATH } from "./config/config.ts";
-import { BUILTIN_PROVIDERS } from "./config/providers.ts";
+import { BUILTIN_PROVIDERS, firstLocalModel } from "./config/providers.ts";
 import { extractPositional } from "./cli-args.ts";
 import { OpenRouterClient } from "./models/openrouter.ts";
 import { ToolRegistry } from "./tools/types.ts";
@@ -312,7 +312,12 @@ async function main(): Promise<void> {
     if (preset.defaultModel) config.model.primary = preset.defaultModel;
     if (preset.baseUrl !== "https://openrouter.ai/api/v1") {
       config.activeProvider = preset.name;
-      config.providers = { ...config.providers, [preset.name]: { type: "openai-compat", baseUrl: preset.baseUrl, apiKeyEnv: preset.apiKeyEnv, model: preset.defaultModel } };
+      // Keyless local endpoints (Ollama) get a placeholder key so resolveProvider doesn't
+      // demand one; with no explicit --model, seed a pulled model so the request isn't sent
+      // with an OpenRouter-style id the local server would 404 on.
+      const localModel = preset.keyless && modelIdx === -1 && !preset.defaultModel ? await firstLocalModel(preset.baseUrl) : undefined;
+      if (localModel) config.model.primary = localModel;
+      config.providers = { ...config.providers, [preset.name]: { type: "openai-compat", baseUrl: preset.baseUrl, apiKeyEnv: preset.apiKeyEnv, apiKey: preset.keyless ? "local" : undefined, model: preset.defaultModel } };
     }
   }
 
