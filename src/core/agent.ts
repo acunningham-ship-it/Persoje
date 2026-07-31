@@ -1,5 +1,5 @@
 import type { AgentEvent } from "./events.ts";
-import { Accounting } from "./tokens.ts";
+import { Accounting, estimateTokens } from "./tokens.ts";
 import { buildSystemPrompt, buildRepoMapSection, buildPinsSection, findProjectConventions } from "./prompt.ts";
 import { ContextManager } from "../context/manager.ts";
 import { OpenRouterClient, type ToolCallRequest, type ChatMessage } from "../models/openrouter.ts";
@@ -295,6 +295,7 @@ export class Agent {
 
         let text = "";
         let toolCalls: ToolCallRequest[] = [];
+        let sawUsage = false;
 
         const skillCatalog = this.deps.skills?.summaryForPrompt() ?? "";
 
@@ -366,6 +367,7 @@ maxTokens: 8192,
             // Pass reasoning content through unchanged (Phase 2 renders it).
             yield { type: "reasoning", content: ev.content };
           } else if (ev.type === "usage") {
+            sawUsage = true;
             this.accounting.record(ev.usage);
             this.context.recordActualInput(ev.usage.inputTokens, ev.usage.cachedTokens); // calibrate gauge + compaction (and detect caching)
             yield { type: "usage", usage: ev.usage };
@@ -373,6 +375,30 @@ maxTokens: 8192,
             yield { type: "retry", attempt: ev.attempt, maxRetries: ev.maxRetries, delayMs: ev.delayMs, reason: ev.reason };
           }
         }
+
+        // Ollama and some OpenAI-compat servers omit the `usage` object entirely.
+        // Without it the call never reaches accounting and the session summary reads
+        // "0 calls · 0 tok" after a real generation. Synthesize a record so the call
+        // is counted; tokens are estimated (we have the sent context + the reply) and
+        // cost is 0 — local generation is genuinely free, not unknown.
+        if (!sawUsage) {
+          // Estimate from what actually went on the wire — system prompt + history
+          // (messages) plus the tool schemas, which are sent separately — and the
+          // reply. estimateTokensUsed() would undercount badly: it's history-only,
+          // ~6 tokens on a first turn, ignoring the multi-thousand-token system+tools.
+          const sent = JSON.stringify(messages) + JSON.stringify(tools.schemas());
+          const synth = {
+            model: config.model.primary,
+            inputTokens: estimateTokens(sent),
+            outputTokens: estimateTokens(text),
+            cachedTokens: 0,
+            cost: 0,
+            durationMs: 0,
+          };
+          this.accounting.record(synth);
+          yield { type: "usage", usage: synth };
+        }
+
         // Rescue: weak models emit tool calls as text instead of native tool_calls.
         if (toolCalls.length === 0 && text) {
           const rescued = rescueToolCalls(text, tools.names());

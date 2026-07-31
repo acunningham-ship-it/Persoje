@@ -190,6 +190,24 @@ test("zero cost ceiling means unlimited (no halt)", async () => {
   expect(events.find((e) => e.type === "turn-end")).toMatchObject({ reason: "done" });
 });
 
+test("counts the call when the provider omits usage (Ollama-style)", async () => {
+  // Ollama's OpenAI-compat responses can omit the `usage` object. The generation
+  // still happened, so accounting must count it — not report "0 calls · 0 tok".
+  // Note the script has NO usage event, unlike every other test here.
+  const client = fakeClient([[{ type: "text", delta: "hi there" }]]);
+  const agent = new Agent({ client, tools: new ToolRegistry(), config: makeConfig(), cwd: "/tmp" });
+  const events = await collect(agent.run("hi"));
+
+  const totals = agent.accounting.totals();
+  expect(totals.calls).toBe(1); // the call is counted despite no usage report
+  expect(totals.inputTokens).toBeGreaterThan(0); // sent payload estimated
+  expect(totals.outputTokens).toBeGreaterThan(0); // reply estimated
+  expect(totals.cost).toBe(0); // local generation is genuinely free, not unknown
+  // A synthetic usage event is surfaced so the StatusBar / summary still update.
+  expect(events.find((e) => e.type === "usage")).toBeTruthy();
+  expect(events.find((e) => e.type === "turn-end")).toMatchObject({ reason: "done" });
+});
+
 test("unknown tool returns an error result to the model instead of crashing", async () => {
   const client = fakeClient([
     [{ type: "tool-calls", calls: [{ id: "c1", name: "made_up_tool", argsJson: "{}" }] }, usage],
