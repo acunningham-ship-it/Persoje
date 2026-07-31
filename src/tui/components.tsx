@@ -147,10 +147,13 @@ export function CommandMenu({
   selected: number;
 }): React.ReactElement {
   const width = Math.max(...items.map((c) => c.name.length)) + 1;
-  const WINDOW = 8;
+  // Grow the visible window on taller terminals; never below the original 8, and
+  // capped so the popup can't crowd out the conversation on a short terminal.
+  const WINDOW = Math.max(8, Math.min(12, (process.stdout.rows ?? 24) - 14));
   const start =
     items.length <= WINDOW ? 0 : Math.min(Math.max(0, selected - Math.floor(WINDOW / 2)), items.length - WINDOW);
   const visible = items.slice(start, start + WINDOW);
+  const hidden = Math.max(0, items.length - start - WINDOW);
   return (
     <Box flexDirection="column" marginLeft={2}>
       {start > 0 ? <Text dimColor>{`  ↑ ${start} more`}</Text> : null}
@@ -165,7 +168,9 @@ export function CommandMenu({
           </Text>
         );
       })}
-      {start + WINDOW < items.length ? <Text dimColor>{`  ↓ ${items.length - start - WINDOW} more`}</Text> : null}
+      {/* Always-on footer: teaches scrolling + points at /help for the full list,
+          and folds the overflow count in when the window doesn't show everything. */}
+      <Text dimColor>{`  ${hidden > 0 ? `↓ ${hidden} more · ` : ""}↑↓ move · ↵ select · /help lists all`}</Text>
     </Box>
   );
 }

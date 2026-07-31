@@ -85,14 +85,11 @@ async function runTurn(agent: Agent, input: string): Promise<void> {
           process.stdout.write(`    ${note}\n`);
           break;
         }
+        // Per-call model/cost is NOT streamed — it glued a stat line onto the end
+        // of every assistant sentence ("line spam"). Cost lives at end-of-turn
+        // (session summary below), in /cost, and in the transcript. A model switch
+        // still surfaces via the "router" event, so routing stays visible.
         case "usage":
-          process.stdout.write(
-            chalk.dim(
-              `  ◦ ${ev.usage.model} in:${ev.usage.inputTokens} out:${ev.usage.outputTokens}` +
-                (ev.usage.cachedTokens ? ` cached:${ev.usage.cachedTokens}` : "") +
-                ` ${fmtCost(ev.usage.cost)}\n`,
-            ),
-          );
           break;
         case "compaction":
           process.stdout.write(chalk.dim(`  ⇣ compacted ~${ev.beforeTokens} → ~${ev.afterTokens} tok\n`));

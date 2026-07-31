@@ -59,11 +59,32 @@ export function filterCommands(input: string): CommandMeta[] {
   return COMMANDS.filter((c) => c.name.startsWith(query));
 }
 
+// Grouping for /help only — the autocomplete menu stays flat. Listing names by
+// topic makes the full list scannable instead of a 31-line wall; any command not
+// placed in a group still shows under "More", so nothing is ever hidden.
+const HELP_GROUPS: readonly (readonly [string, readonly string[]])[] = [
+  ["Model & routing", ["/model", "/models", "/provider", "/retry"]],
+  ["Session", ["/resume", "/compact", "/clear", "/goal", "/init", "/undo", "/diff", "/copy"]],
+  ["Cost & status", ["/cost", "/budget", "/status", "/config", "/stats"]],
+  ["Memory & skills", ["/memory", "/skills", "/dream", "/repomap"]],
+  ["Tools & permissions", ["/permissions", "/permsoff", "/mcp", "/monitor", "/plan", "/autonomous"]],
+  ["Appearance", ["/theme", "/personality"]],
+  ["Meta", ["/help", "/exit"]],
+];
+
 export function helpText(): string {
   // Multi-line format: command on one line, description on the next.
   // This prevents Ink from hard-wrapping long description lines.
-  return COMMANDS.map((c) => {
-    const cmd = c.name + (c.args ? " " + c.args : "");
-    return `  ${cmd}\n    ${c.desc}`;
-  }).join("\n");
+  const byName = new Map(COMMANDS.map((c) => [c.name, c]));
+  const fmt = (c: CommandMeta) => `  ${c.name + (c.args ? " " + c.args : "")}\n    ${c.desc}`;
+  const placed = new Set<string>();
+  const sections: string[] = [];
+  for (const [title, names] of HELP_GROUPS) {
+    const cmds = names.map((n) => byName.get(n)).filter((c): c is CommandMeta => !!c);
+    cmds.forEach((c) => placed.add(c.name));
+    if (cmds.length) sections.push(`${title}\n${cmds.map(fmt).join("\n")}`);
+  }
+  const leftover = COMMANDS.filter((c) => !placed.has(c.name));
+  if (leftover.length) sections.push(`More\n${leftover.map(fmt).join("\n")}`);
+  return sections.join("\n\n");
 }
