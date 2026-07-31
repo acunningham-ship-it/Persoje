@@ -38,10 +38,9 @@ describe("multi-provider config", () => {
   it("resolveProvider falls back to legacy openrouter block when no providers defined", async () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
-      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
+      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true, headroom: 20, accurateEstimates: true },
       loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
-      effort: { level: "mid" },
       toolResultCaps: {},
       router: { enabled: true, mode: "offer", failureThreshold: 3, canary: true, escalateTo: "" },
       memory: { enabled: true, budgetTokens: 1200, dreamModel: "" },
@@ -65,10 +64,9 @@ describe("multi-provider config", () => {
   it("resolveApiKey delegates to resolveProvider for backward compat", async () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
-      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
+      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true, headroom: 20, accurateEstimates: true },
       loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
-      effort: { level: "mid" },
       toolResultCaps: {},
       router: { enabled: true, mode: "offer", failureThreshold: 3, canary: true, escalateTo: "" },
       memory: { enabled: true, budgetTokens: 1200, dreamModel: "" },
@@ -90,10 +88,9 @@ describe("multi-provider config", () => {
 
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
-      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
+      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true, headroom: 20, accurateEstimates: true },
       loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
-      effort: { level: "mid" },
       toolResultCaps: {},
       router: { enabled: true, mode: "offer", failureThreshold: 3, canary: true, escalateTo: "" },
       memory: { enabled: true, budgetTokens: 1200, dreamModel: "" },
@@ -114,10 +111,9 @@ describe("multi-provider config", () => {
   it("resolveProvider resolves a named provider with explicit baseUrl and apiKey", async () => {
     const config: PersojeConfig = {
       model: { primary: "deepseek/deepseek-chat", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
-      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
+      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true, headroom: 20, accurateEstimates: true },
       loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
-      effort: { level: "mid" },
       toolResultCaps: {},
       router: { enabled: true, mode: "offer", failureThreshold: 3, canary: true, escalateTo: "" },
       memory: { enabled: true, budgetTokens: 1200, dreamModel: "" },
@@ -145,10 +141,9 @@ describe("multi-provider config", () => {
 
     const config: PersojeConfig = {
       model: { primary: "deepseek/deepseek-chat", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
-      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
+      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true, headroom: 20, accurateEstimates: true },
       loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
-      effort: { level: "mid" },
       toolResultCaps: {},
       router: { enabled: true, mode: "offer", failureThreshold: 3, canary: true, escalateTo: "" },
       memory: { enabled: true, budgetTokens: 1200, dreamModel: "" },
@@ -173,10 +168,9 @@ describe("multi-provider config", () => {
   it("resolveProvider includes routing from provider config", async () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
-      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
+      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true, headroom: 20, accurateEstimates: true },
       loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
-      effort: { level: "mid" },
       toolResultCaps: {},
       router: { enabled: true, mode: "offer", failureThreshold: 3, canary: true, escalateTo: "" },
       memory: { enabled: true, budgetTokens: 1200, dreamModel: "" },
@@ -200,10 +194,9 @@ describe("multi-provider config", () => {
   it("resolveProvider includes optional model from provider config", async () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
-      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
+      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true, headroom: 20, accurateEstimates: true },
       loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
-      effort: { level: "mid" },
       toolResultCaps: {},
       router: { enabled: true, mode: "offer", failureThreshold: 3, canary: true, escalateTo: "" },
       memory: { enabled: true, budgetTokens: 1200, dreamModel: "" },
@@ -227,10 +220,9 @@ describe("multi-provider config", () => {
   it("throws error when provider not found and not openrouter", async () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
-      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
+      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true, headroom: 20, accurateEstimates: true },
       loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
-      effort: { level: "mid" },
       toolResultCaps: {},
       router: { enabled: true, mode: "offer", failureThreshold: 3, canary: true, escalateTo: "" },
       memory: { enabled: true, budgetTokens: 1200, dreamModel: "" },
@@ -246,10 +238,9 @@ describe("multi-provider config", () => {
   it("throws error when provider has no baseUrl", async () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
-      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
+      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true, headroom: 20, accurateEstimates: true },
       loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
-      effort: { level: "mid" },
       toolResultCaps: {},
       router: { enabled: true, mode: "offer", failureThreshold: 3, canary: true, escalateTo: "" },
       memory: { enabled: true, budgetTokens: 1200, dreamModel: "" },
@@ -271,10 +262,9 @@ describe("multi-provider config", () => {
   it("throws error when no API key available", async () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
-      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
+      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true, headroom: 20, accurateEstimates: true },
       loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
-      effort: { level: "mid" },
       toolResultCaps: {},
       router: { enabled: true, mode: "offer", failureThreshold: 3, canary: true, escalateTo: "" },
       memory: { enabled: true, budgetTokens: 1200, dreamModel: "" },
@@ -320,10 +310,9 @@ describe("multi-provider config", () => {
   it("legacy openrouter.provider routing is passed through in synthesized provider", async () => {
     const config: PersojeConfig = {
       model: { primary: "openrouter/auto", fallbacks: [], compactor: "", subagent: "", judge: "", temperature: 0.3 },
-      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true },
+      context: { budgetTokens: 40000, compactionThreshold: 0.8, keepFullTurns: 4, repoMapTokens: 800, cacheSystemPrompt: true, headroom: 20, accurateEstimates: true },
       loop: { maxIterations: 0, stuckLimit: 10, bashTimeoutMs: 60000, maxCostUsd: 0, enableMonitors: true },
       retry: { maxRetries: 5 },
-      effort: { level: "mid" },
       toolResultCaps: {},
       router: { enabled: true, mode: "offer", failureThreshold: 3, canary: true, escalateTo: "" },
       memory: { enabled: true, budgetTokens: 1200, dreamModel: "" },
