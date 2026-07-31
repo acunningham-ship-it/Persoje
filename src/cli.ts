@@ -4,6 +4,7 @@ import * as readline from "node:readline/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { Agent } from "./core/agent.ts";
+import { formatToolCall } from "./core/tool-summary.ts";
 import { loadConfig, resolveApiKey, resolveProvider, GLOBAL_CONFIG_DIR, GLOBAL_CONFIG_PATH } from "./config/config.ts";
 import { BUILTIN_PROVIDERS } from "./config/providers.ts";
 import { extractPositional } from "./cli-args.ts";
@@ -73,8 +74,7 @@ async function runTurn(agent: Agent, input: string): Promise<void> {
           process.stdout.write("\n");
           break;
         case "tool-start": {
-          const argStr = JSON.stringify(ev.args);
-          process.stdout.write(chalk.dim(`  ⚙ ${ev.name} ${argStr.length > 120 ? argStr.slice(0, 120) + "…" : argStr}\n`));
+          process.stdout.write(chalk.dim(`  ⚙ ${formatToolCall(ev.name, ev.args)}\n`));
           break;
         }
         case "tool-result": {
@@ -153,7 +153,7 @@ async function runHeadless(agent: Agent, maxRounds = 25): Promise<void> {
     )) {
       if (ev.type === "tool-start") {
         madeToolCall = true;
-        log(`  ⚙ ${ev.name} ${JSON.stringify(ev.args).slice(0, 120)}`);
+        log(`  ⚙ ${formatToolCall(ev.name, ev.args)}`);
       } else if (ev.type === "tool-result" && ev.isError) {
         log(`  ✗ ${ev.result.split("\n")[0]}`);
       } else if (ev.type === "text-end") {
