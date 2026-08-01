@@ -33,3 +33,38 @@ describe("context budget resolution", () => {
     expect(resolveBudgetTokens(200_000, -1)).toBe(UNKNOWN_WINDOW_BUDGET);
   });
 });
+
+import { contextLengthFromShow } from "../src/config/providers.ts";
+
+describe("local (Ollama) context window extraction", () => {
+  test("⛔ the key is ARCHITECTURE-PREFIXED, not a plain context_length", () => {
+    // Measured against a live Ollama: qwen2.5-coder:7b returns exactly this shape.
+    // A hardcoded `model_info.context_length` lookup finds NOTHING and reports "unknown",
+    // which is the case that silently overflows the budget.
+    expect(contextLengthFromShow({ model_info: { "qwen2.context_length": 32768 } })).toBe(32768);
+    expect(contextLengthFromShow({ model_info: { "llama.context_length": 8192 } })).toBe(8192);
+    expect(contextLengthFromShow({ model_info: { "gemma3.context_length": 131072 } })).toBe(131072);
+  });
+
+  test("accepts an unprefixed key too, if a server ever emits one", () => {
+    expect(contextLengthFromShow({ model_info: { context_length: 4096 } })).toBe(4096);
+  });
+
+  test("ignores other numeric model_info fields", () => {
+    const show = { model_info: { "qwen2.embedding_length": 3584, "qwen2.block_count": 28 } };
+    expect(contextLengthFromShow(show)).toBeUndefined();
+  });
+
+  test("returns undefined on junk rather than throwing", () => {
+    expect(contextLengthFromShow(null)).toBeUndefined();
+    expect(contextLengthFromShow({})).toBeUndefined();
+    expect(contextLengthFromShow({ model_info: "nope" })).toBeUndefined();
+    expect(contextLengthFromShow({ model_info: { "x.context_length": 0 } })).toBeUndefined();
+    expect(contextLengthFromShow({ model_info: { "x.context_length": "abc" } })).toBeUndefined();
+  });
+
+  test("end to end: an 8k local model no longer gets the 40k floor", () => {
+    const win = contextLengthFromShow({ model_info: { "llama.context_length": 8192 } });
+    expect(resolveBudgetTokens(200_000, win)).toBe(6_553); // 80% of 8192, not 40k
+  });
+});

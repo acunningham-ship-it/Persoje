@@ -137,3 +137,41 @@ export async function firstLocalModel(baseUrl: string): Promise<string | undefin
     return undefined;
   }
 }
+
+/**
+ * Context window of a LOCAL (Ollama) model, from the /api/show call we already make.
+ *
+ * ⛔ The key is ARCHITECTURE-PREFIXED — `qwen2.context_length`, `llama.context_length`,
+ * `gemma3.context_length` — there is no fixed `context_length` field. Measured against a live
+ * Ollama: qwen2.5-coder:7b returns `{"qwen2.context_length": 32768}`. A hardcoded lookup finds
+ * nothing and silently reports "unknown", which is exactly the case that overflows the budget.
+ *
+ * Split out as a pure function so the key-shape logic is testable without a running Ollama.
+ */
+export function contextLengthFromShow(showJson: unknown): number | undefined {
+  const info = (showJson as { model_info?: Record<string, unknown> } | null)?.model_info;
+  if (!info || typeof info !== "object") return undefined;
+  for (const [k, v] of Object.entries(info)) {
+    if (k.endsWith(".context_length") || k === "context_length") {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return undefined;
+}
+
+/** Ask a local Ollama for a model's real context window. undefined if unreachable/unknown. */
+export async function localModelContextWindow(baseUrl: string, model: string): Promise<number | undefined> {
+  const origin = baseUrl.replace(/\/v1\/?$/, "").replace(/\/+$/, "");
+  try {
+    const res = await fetch(`${origin}/api/show`, {
+      method: "POST",
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return undefined;
+    return contextLengthFromShow(await res.json());
+  } catch {
+    return undefined; // not Ollama, or down — caller falls back to the conservative floor
+  }
+}

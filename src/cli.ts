@@ -7,7 +7,7 @@ import { Agent } from "./core/agent.ts";
 import { formatToolCall } from "./core/tool-summary.ts";
 import { loadConfig, resolveApiKey, resolveProvider, GLOBAL_CONFIG_DIR, GLOBAL_CONFIG_PATH } from "./config/config.ts";
 import { resolveBudgetTokens } from "./config/budget.ts";
-import { BUILTIN_PROVIDERS, firstLocalModel } from "./config/providers.ts";
+import { BUILTIN_PROVIDERS, firstLocalModel, localModelContextWindow } from "./config/providers.ts";
 import { extractPositional } from "./cli-args.ts";
 import { OpenRouterClient } from "./models/openrouter.ts";
 import { ToolRegistry } from "./tools/types.ts";
@@ -352,14 +352,19 @@ async function main(): Promise<void> {
   // headroom for the system prompt, tools, repo-map + response). A large default is right for
   // a 1M-window model like owl-alpha but must never exceed a smaller model's window. The
   // window list is disk-cached (24h), so this is ~free.
+  let win: number | undefined;
   try {
-    const win = (await client.modelContextWindows()).get(config.model.primary);
-    config.context.budgetTokens = resolveBudgetTokens(config.context.budgetTokens, win);
+    win = (await client.modelContextWindows()).get(config.model.primary);
   } catch {
-    // Lookup failed entirely (no key, offline, rate-limited). Same rule as an unknown model:
-    // fall back to the conservative floor rather than keeping a large configured budget.
-    config.context.budgetTokens = resolveBudgetTokens(config.context.budgetTokens, undefined);
+    // Catalog unreachable (no key, offline, rate-limited) — leave win undefined.
   }
+  if (win === undefined) {
+    // A LOCAL model is absent from OpenRouter's catalog, but its window is not actually
+    // unknown: Ollama reports it via /api/show. Resolving it here is what stops an 8k local
+    // model being handed the conservative 40k floor and overflowing anyway.
+    win = await localModelContextWindow(provider.baseUrl, config.model.primary);
+  }
+  config.context.budgetTokens = resolveBudgetTokens(config.context.budgetTokens, win);
 
   const tools = buildRegistry(skills, mcp);
   const agent = new Agent({ client, tools, config, cwd, repoMap, skills });
