@@ -20,14 +20,16 @@ const ConfigSchema = z.object({
     .prefault({}),
   context: z
     .object({
-      /** Self-imposed context budget in tokens — deliberately far below model max. */
-      budgetTokens: z.number().default(40_000),
+      /** Self-imposed context budget in tokens. Clamped at startup to the active model's
+       *  window (× 0.8), so this default suits a 1M-window model (owl-alpha) without
+       *  overflowing a smaller one. 40k was strangling reasoning on big-window models. */
+      budgetTokens: z.number().default(200_000),
       /** Compact when estimated history exceeds this fraction of the budget. */
       compactionThreshold: z.number().min(0.3).max(0.95).default(0.65),
       /** Turns kept at full fidelity during compaction. */
       keepFullTurns: z.number().default(10),
       /** Repo-map token budget; 0 disables. */
-      repoMapTokens: z.number().default(400),
+      repoMapTokens: z.number().default(1_500),
       /** Attach a cache_control breakpoint to the system prompt (providers without caching ignore it). */
       cacheSystemPrompt: z.boolean().default(true),
       /** Min % of context budget kept free as headroom (0-50). E.g. 20 = compact to 80% at most. */

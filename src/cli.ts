@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { Agent } from "./core/agent.ts";
 import { formatToolCall } from "./core/tool-summary.ts";
 import { loadConfig, resolveApiKey, resolveProvider, GLOBAL_CONFIG_DIR, GLOBAL_CONFIG_PATH } from "./config/config.ts";
+import { resolveBudgetTokens } from "./config/budget.ts";
 import { BUILTIN_PROVIDERS, firstLocalModel } from "./config/providers.ts";
 import { extractPositional } from "./cli-args.ts";
 import { OpenRouterClient } from "./models/openrouter.ts";
@@ -353,11 +354,11 @@ async function main(): Promise<void> {
   // window list is disk-cached (24h), so this is ~free.
   try {
     const win = (await client.modelContextWindows()).get(config.model.primary);
-    if (win && win > 0) {
-      config.context.budgetTokens = Math.min(config.context.budgetTokens, Math.floor(win * 0.8));
-    }
+    config.context.budgetTokens = resolveBudgetTokens(config.context.budgetTokens, win);
   } catch {
-    // window unknown — keep the configured budget
+    // Lookup failed entirely (no key, offline, rate-limited). Same rule as an unknown model:
+    // fall back to the conservative floor rather than keeping a large configured budget.
+    config.context.budgetTokens = resolveBudgetTokens(config.context.budgetTokens, undefined);
   }
 
   const tools = buildRegistry(skills, mcp);
