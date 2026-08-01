@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { Agent } from "./core/agent.ts";
 import { formatToolCall } from "./core/tool-summary.ts";
 import { loadConfig, resolveApiKey, resolveProvider, GLOBAL_CONFIG_DIR, GLOBAL_CONFIG_PATH } from "./config/config.ts";
-import { resolveBudgetTokens } from "./config/budget.ts";
+import { resolveBudgetTokens, resolveRepoMapTokens } from "./config/budget.ts";
 import { BUILTIN_PROVIDERS, firstLocalModel, localModelContextWindow } from "./config/providers.ts";
 import { extractPositional } from "./cli-args.ts";
 import { OpenRouterClient } from "./models/openrouter.ts";
@@ -365,6 +365,12 @@ async function main(): Promise<void> {
     win = await localModelContextWindow(provider.baseUrl, config.model.primary);
   }
   config.context.budgetTokens = resolveBudgetTokens(config.context.budgetTokens, win);
+  // The repo map is FIXED cost paid every turn, so it has to scale with the budget we just
+  // resolved — a flat 1500 is cheap on a 1M-window model and crowds out a 32k local one.
+  config.context.repoMapTokens = resolveRepoMapTokens(
+    config.context.repoMapTokens,
+    config.context.budgetTokens
+  );
 
   const tools = buildRegistry(skills, mcp);
   const agent = new Agent({ client, tools, config, cwd, repoMap, skills });

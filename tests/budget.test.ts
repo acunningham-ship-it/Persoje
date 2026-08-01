@@ -68,3 +68,31 @@ describe("local (Ollama) context window extraction", () => {
     expect(resolveBudgetTokens(200_000, win)).toBe(6_553); // 80% of 8192, not 40k
   });
 });
+
+import { resolveRepoMapTokens } from "../src/config/budget.ts";
+
+describe("repo-map scales with the budget (it is FIXED cost, paid every turn)", () => {
+  test("a big-window model keeps the full configured map", () => {
+    // owl-alpha at 200k budget: 3% = 6000, so the 1500 ceiling wins.
+    expect(resolveRepoMapTokens(1_500, 200_000)).toBe(1_500);
+  });
+
+  test("⛔ a small local model shrinks the map instead of being crowded out", () => {
+    // 32k model resolves to a 26214 budget; a flat 1500 would be ~6% of everything it can hold.
+    expect(resolveRepoMapTokens(1_500, 26_214)).toBe(786);
+    expect(resolveRepoMapTokens(1_500, 6_553)).toBe(196); // 8k model
+  });
+
+  test("never raises above the configured ceiling", () => {
+    expect(resolveRepoMapTokens(400, 1_000_000)).toBe(400);
+  });
+
+  test("a nonsense budget falls back to the old conservative default", () => {
+    expect(resolveRepoMapTokens(1_500, 0)).toBe(400);
+    expect(resolveRepoMapTokens(1_500, NaN)).toBe(400);
+  });
+
+  test("0 disables the map and stays disabled", () => {
+    expect(resolveRepoMapTokens(0, 200_000)).toBe(0);
+  });
+});

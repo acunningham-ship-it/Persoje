@@ -12,12 +12,12 @@ export const monitorTool: Tool = {
   name: "monitor",
   description: "Manage background monitors: add, remove, list, or silence periodic checks that fire alerts mid-conversation.",
   args: z.object({
-    action: z.enum(["add", "remove", "list", "silence"]).describe("add=create a monitor, remove=delete one, list=show all, silence=defer alerts for N iterations"),
-    name: z.string().optional().describe("Monitor name (kebab-case, e.g. 'n8n-health')"),
-    cmd: z.string().optional().describe("Shell command to run periodically (for add)"),
-    intervalSec: z.number().optional().describe("Check interval in seconds (for add, default 30)"),
-    description: z.string().optional().describe("Human-readable description of what this monitors (for add)"),
-    iterations: z.number().optional().describe("Number of iterations to silence (for silence action)"),
+    action: z.enum(["add", "remove", "list", "silence"]),
+    name: z.string().optional().describe("kebab-case name"),
+    cmd: z.string().optional().describe("shell command (add)"),
+    intervalSec: z.number().optional().describe("seconds, default 30"),
+    description: z.string().optional(),
+    iterations: z.number().optional().describe("iterations (silence)"),
   }),
   maxResultTokens: 500,
   async execute(args, _ctx) {

@@ -32,3 +32,23 @@ export function resolveBudgetTokens(configured: number, window: number | undefin
   // is already below it (someone deliberately running lean should stay lean).
   return Math.min(configured, UNKNOWN_WINDOW_BUDGET);
 }
+
+/** Share of the context budget the repo map may occupy. */
+export const REPO_MAP_SHARE = 0.03;
+
+/**
+ * Repo-map size, scaled to the budget we actually resolved.
+ *
+ * A flat default cannot be right for both ends: 1500 tokens is cheap against a 1M-window
+ * model and ruinous against a 32k local one, where it competes with the actual conversation.
+ * Worse, it is FIXED COST — paid on every single turn, unlike history which at least earns
+ * its place. Measured on this repo, a flat 1500 was 42% of all fixed prompt overhead.
+ *
+ * So treat `configured` as a ceiling and take the smaller of it and a fixed share of the
+ * budget. Big-window models keep the full map; small ones shrink automatically instead of
+ * being crowded out.
+ */
+export function resolveRepoMapTokens(configured: number, budgetTokens: number): number {
+  if (!Number.isFinite(budgetTokens) || budgetTokens <= 0) return Math.min(configured, 400);
+  return Math.max(0, Math.min(configured, Math.floor(budgetTokens * REPO_MAP_SHARE)));
+}
