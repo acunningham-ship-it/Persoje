@@ -10,48 +10,17 @@ import { resolveBudgetTokens, resolveRepoMapTokens } from "./config/budget.ts";
 import { BUILTIN_PROVIDERS, firstLocalModel, localModelContextWindow } from "./config/providers.ts";
 import { extractPositional } from "./cli-args.ts";
 import { OpenRouterClient } from "./models/openrouter.ts";
-import { ToolRegistry } from "./tools/types.ts";
-import { readTool, writeTool, editTool, multiEditTool, lsTool, globTool } from "./tools/file-tools.ts";
-import { bashTool, grepTool } from "./tools/shell-tools.ts";
-import { webFetchTool, webSearchTool } from "./tools/web-tools.ts";
+import { buildRegistry } from "./tools/registry-builder.ts";
 import { SessionStore } from "./session/store.ts";
 import { TranscriptWriter } from "./context/transcript.ts";
-import { setGoalTool, transcriptTool } from "./tools/goal-tools.ts";
-import { updateTodosTool } from "./tools/todo-tools.ts";
 import { buildRepoMap } from "./context/repo-map.ts";
 import { ProfileStore } from "./router/router.ts";
 import { FactStore } from "./memory/facts.ts";
 import { SkillLibrary } from "./memory/skills.ts";
 import { makeTaskTool } from "./agents/subagent.ts";
-import { makeAddSkillTool, makeInvokeSkillTool, makeListSkillsTool } from "./tools/skill-tools.ts";
-import { monitorTool } from "./tools/monitor-tools.ts";
 import { McpManager } from "./mcp/client.ts";
 
 const VERSION = "0.4.0";
-
-function buildRegistry(skills: SkillLibrary, mcp?: McpManager): ToolRegistry {
-  const registry = new ToolRegistry();
-  for (const t of [readTool, writeTool, editTool, multiEditTool, lsTool, globTool, bashTool, grepTool, webFetchTool, webSearchTool]) registry.register(t);
-  // Goal anchor + working plan + transcript escape-hatch
-  registry.register(setGoalTool);
-  registry.register(updateTodosTool);
-  registry.register(transcriptTool);
-  // Self-learning skill tools. add_skill is always available (so it can create
-  // the first one); invoke/list only matter once skills exist — gate them to
-  // save tool-schema tokens on every call when the library is empty.
-  registry.register(makeAddSkillTool(skills));
-  // Monitor management — background watchers that fire between iterations
-  registry.register(monitorTool);
-  if (skills.list().length > 0) {
-    registry.register(makeInvokeSkillTool(skills));
-    registry.register(makeListSkillsTool(skills));
-  }
-  // MCP tools
-  if (mcp) {
-    for (const tool of mcp.getTools()) registry.register(tool);
-  }
-  return registry;
-}
 
 function fmtCost(cost: number): string {
   return cost < 0.01 ? `$${cost.toFixed(5)}` : `$${cost.toFixed(3)}`;
@@ -372,7 +341,7 @@ async function main(): Promise<void> {
     config.context.budgetTokens
   );
 
-  const tools = buildRegistry(skills, mcp);
+  const tools = buildRegistry(skills, mcp, config.tools.gateLowFrequency);
   const agent = new Agent({ client, tools, config, cwd, repoMap, skills });
   // The task tool lets the main model delegate to isolated sub-agents.
   // Pass full AgentDeps so subagents inherit repo-map, skills.

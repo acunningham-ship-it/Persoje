@@ -61,6 +61,16 @@ const ConfigSchema = z.object({
     })
     .prefault({}),
   toolResultCaps: z.record(z.string(), z.number()).default({}),
+  tools: z
+    .object({
+      /** Gate low-frequency tool schemas (web_fetch, web_search, multi_edit) out of the
+       *  always-on registry to cut fixed per-turn token cost; a `more_tools` meta-tool lets
+       *  the model reveal them on demand. DEFAULT OFF — flag off is byte-identical to the
+       *  pre-flag tool set (see tests/tool-gating.test.ts). Core tools (read/write/edit/
+       *  bash/ls/glob/grep) are NEVER gated regardless of this flag. */
+      gateLowFrequency: z.boolean().default(false),
+    })
+    .prefault({}),
   router: z
     .object({
       /** Master toggle: off = fully manual model selection (no escalation suggestions, no canary). */
