@@ -25,7 +25,8 @@ describe("dynamic tool gating (config.tools.gateLowFrequency)", () => {
     expect(off.names()).toEqual(explicitOff.names());
 
     // The full pre-gating tool set is present — nothing hidden, no more_tools tool added.
-    for (const t of ["read", "write", "edit", "multi_edit", "ls", "glob", "bash", "grep", "web_fetch", "web_search"]) {
+    // monitor + add_skill included: they must stay unconditionally registered when the flag is off.
+    for (const t of ["read", "write", "edit", "multi_edit", "ls", "glob", "bash", "grep", "web_fetch", "web_search", "monitor", "add_skill"]) {
       expect(off.names()).toContain(t);
     }
     expect(off.names()).not.toContain("more_tools");
@@ -42,6 +43,10 @@ describe("dynamic tool gating (config.tools.gateLowFrequency)", () => {
     for (const t of lowFrequencyTools()) {
       expect(on.names()).not.toContain(t.name);
     }
+    // add_skill is gated too but isn't in lowFrequencyTools() (it's constructed with the skills lib).
+    expect(on.names()).not.toContain("add_skill");
+    // monitor is in lowFrequencyTools() so the loop above covers it; assert explicitly for clarity.
+    expect(on.names()).not.toContain("monitor");
     expect(on.names()).toContain("more_tools");
 
     // Core tools are NEVER gated, flag on or off — this is the hard safety line.
@@ -70,6 +75,9 @@ describe("dynamic tool gating (config.tools.gateLowFrequency)", () => {
     expect(registry.names()).toContain("web_fetch");
     expect(registry.names()).toContain("web_search");
     expect(registry.names()).toContain("multi_edit");
+    // monitor + add_skill are revealed by the same call — no capability is permanently lost.
+    expect(registry.names()).toContain("monitor");
+    expect(registry.names()).toContain("add_skill");
     // The reveal message names what's now available, so the model knows to use it directly
     // rather than calling more_tools again.
     expect(result).toContain("web_fetch");
