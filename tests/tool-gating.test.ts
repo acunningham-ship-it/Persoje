@@ -49,6 +49,14 @@ describe("dynamic tool gating (config.tools.gateLowFrequency)", () => {
     expect(on.names()).not.toContain("monitor");
     expect(on.names()).toContain("more_tools");
 
+    // more_tools must ADVERTISE everything it gates (its description is derived from the gated set),
+    // or the model can't know to reveal them — a gated tool missing from the description is silently
+    // unreachable. This locks against the description drifting from the actual gated list.
+    const moreDesc = on.get("more_tools")!.description;
+    for (const name of ["web_fetch", "web_search", "multi_edit", "monitor", "add_skill"]) {
+      expect(moreDesc).toContain(name);
+    }
+
     // Core tools are NEVER gated, flag on or off — this is the hard safety line.
     for (const t of ["read", "write", "edit", "ls", "glob", "bash", "grep"]) {
       expect(on.names()).toContain(t);

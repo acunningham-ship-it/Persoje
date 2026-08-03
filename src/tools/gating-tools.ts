@@ -15,8 +15,11 @@ import type { ToolRegistry } from "./types.ts";
 export function makeMoreToolsTool(registry: ToolRegistry, gated: Tool[]): Tool {
   return {
     name: "more_tools",
+    // Derive the advertised list from the actual gated set so it can never drift from what's
+    // really behind the reveal (it silently listed only web/multi-edit after monitor+add_skill
+    // were gated — the model wouldn't know to reveal them).
     description:
-      "Reveal additional tools not shown by default (web fetch/search, multi-file edit) — " +
+      `Reveal additional tools not shown by default (${gated.map((t) => t.name).join(", ")}) — ` +
       "call this once if you need one of them, then use it directly.",
     args: z.object({}),
     maxResultTokens: 200,
