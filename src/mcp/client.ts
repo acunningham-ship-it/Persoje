@@ -18,7 +18,7 @@
 
 import { z } from "zod";
 import { spawn, type Subprocess } from "bun";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { readFileSync, writeFileSync, existsSync, renameSync, fsyncSync, openSync } from "node:fs";
 import { mkdirSync } from "node:fs";
 import type { Tool, ToolContext } from "../tools/types.ts";
@@ -66,22 +66,24 @@ export interface McpConfig {
   servers: Record<string, McpServerConfig>;
 }
 
-const MCP_CONFIG_PATH = join(
-  process.env.HOME ?? "",
-  ".config",
-  "persoje",
-  "mcp.json",
-);
+// PERSOJE_CONFIG_DIR overrides the base dir (tests point it at a tmp path so
+// `bun test` never touches the user's real ~/.config/persoje/mcp.json — see
+// vault task #13). Read lazily (a function, not a module-load-time const) so
+// a test's beforeAll can set the env var before the first call.
+function mcpConfigPath(): string {
+  return join(process.env.PERSOJE_CONFIG_DIR || join(process.env.HOME ?? "", ".config", "persoje"), "mcp.json");
+}
 
 export function loadMcpConfig(): McpConfig {
-  if (!existsSync(MCP_CONFIG_PATH)) return { servers: {} };
+  const path = mcpConfigPath();
+  if (!existsSync(path)) return { servers: {} };
   try {
-    return JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8")) as McpConfig;
+    return JSON.parse(readFileSync(path, "utf-8")) as McpConfig;
   } catch (error) {
     // Non-destructive: back up the corrupted file instead of silently discarding it.
-    const backupPath = `${MCP_CONFIG_PATH}.corrupt.bak`;
+    const backupPath = `${path}.corrupt.bak`;
     try {
-      renameSync(MCP_CONFIG_PATH, backupPath);
+      renameSync(path, backupPath);
       console.error(`[MCP] Corrupted mcp.json backed up to ${backupPath}. Falling back to empty config.`);
     } catch {
       console.error(`[MCP] Failed to parse mcp.json and could not back it up. Falling back to empty config.`);
@@ -91,12 +93,13 @@ export function loadMcpConfig(): McpConfig {
 }
 
 export function saveMcpConfig(config: McpConfig): void {
-  mkdirSync(join(process.env.HOME ?? "", ".config", "persoje"), { recursive: true });
+  const path = mcpConfigPath();
+  mkdirSync(dirname(path), { recursive: true });
 
   // Atomic write: write to temp file, fsync, then rename atomically.
   // This prevents corruption if the process crashes mid-write or concurrent
   // writes truncate the file. POSIX rename() is atomic.
-  const tempPath = `${MCP_CONFIG_PATH}.tmp`;
+  const tempPath = `${path}.tmp`;
   try {
     writeFileSync(tempPath, JSON.stringify(config, null, 2), "utf-8");
     // Ensure data is written to disk before rename.
@@ -104,7 +107,7 @@ export function saveMcpConfig(config: McpConfig): void {
     fsyncSync(fd);
     fd; // suppress unused warning
     // Atomic rename: moves temp into place, clobbering any partial/corrupted file.
-    renameSync(tempPath, MCP_CONFIG_PATH);
+    renameSync(tempPath, path);
   } catch (error) {
     console.error(`[MCP] Failed to save config atomically: ${error}`);
     throw error;

@@ -1,22 +1,38 @@
-import { describe, it, expect } from "bun:test";
-import { McpManager, loadMcpConfig, saveMcpConfig, type McpConfig } from "../src/mcp/client.ts";
-import { existsSync, unlinkSync, readFileSync, writeFileSync } from "node:fs";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { McpManager, loadMcpConfig, saveMcpConfig, type McpConfig } from "../src/mcp/client.ts";
 
-const MCP_TEST_PATH = join(process.env.HOME ?? "", ".config", "persoje", "mcp.json");
+// Isolated from the user's real ~/.config/persoje/ — mcp/client.ts reads
+// PERSOJE_CONFIG_DIR lazily (at call time, inside loadMcpConfig/saveMcpConfig),
+// not at import time, so setting it in beforeAll below is enough even though
+// the import above already resolved. Without this, `bun test` read/wrote/
+// deleted the user's real mcp.json, and concurrent runs raced on it (vault
+// task #13 — the literal source of the "Corrupted mcp.json backed up" surprise
+// seen during concurrent test runs).
+let TEST_DIR: string;
+let MCP_TEST_PATH: string;
+
+beforeAll(() => {
+  TEST_DIR = mkdtempSync(join(tmpdir(), "persoje-test-mcp-"));
+  process.env.PERSOJE_CONFIG_DIR = TEST_DIR;
+  MCP_TEST_PATH = join(TEST_DIR, "mcp.json");
+});
+
+afterAll(() => {
+  delete process.env.PERSOJE_CONFIG_DIR;
+  if (TEST_DIR) rmSync(TEST_DIR, { recursive: true, force: true });
+});
 
 describe("MCP config", () => {
+  beforeEach(() => {
+    if (existsSync(MCP_TEST_PATH)) rmSync(MCP_TEST_PATH);
+  });
+
   it("loads empty config when file doesn't exist", () => {
-    // Temporarily rename if exists
-    let backup: string | null = null;
-    if (existsSync(MCP_TEST_PATH)) {
-      backup = readFileSync(MCP_TEST_PATH, "utf-8");
-      unlinkSync(MCP_TEST_PATH);
-    }
     const config = loadMcpConfig();
     expect(config.servers).toEqual({});
-    // Restore
-    if (backup) writeFileSync(MCP_TEST_PATH, backup, "utf-8");
   });
 
   it("saves and loads config", () => {
@@ -32,8 +48,6 @@ describe("MCP config", () => {
     const loaded = loadMcpConfig();
     expect(loaded.servers["test-server"]).toBeDefined();
     expect(loaded.servers["test-server"]!.command).toBe("npx");
-    // Cleanup
-    if (existsSync(MCP_TEST_PATH)) unlinkSync(MCP_TEST_PATH);
   });
 
   it("backs up corrupted config and does not clobber backup on save", () => {
@@ -65,10 +79,6 @@ describe("MCP config", () => {
     expect(existsSync(backupPath)).toBe(true);
     const backupAfter = readFileSync(backupPath, "utf-8");
     expect(backupAfter).toBe(backupContent);
-
-    // Cleanup
-    if (existsSync(MCP_TEST_PATH)) unlinkSync(MCP_TEST_PATH);
-    if (existsSync(backupPath)) unlinkSync(backupPath);
   });
 });
 

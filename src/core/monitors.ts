@@ -16,7 +16,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { homedir, hostname } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { spawn } from "node:child_process";
 
 export interface MonitorConfig {
@@ -63,12 +63,17 @@ export interface MonitorTick {
   fired: boolean;
 }
 
-const MONITORS_PATH = join(homedir(), ".config", "persoje", "monitors.json");
+// PERSOJE_CONFIG_DIR overrides the base dir — see mcp/client.ts's mcpConfigPath
+// for why this is a function, not a module-load-time const (vault task #13).
+function monitorsPath(): string {
+  return join(process.env.PERSOJE_CONFIG_DIR || join(homedir(), ".config", "persoje"), "monitors.json");
+}
 
 function loadMonitors(): MonitorState[] {
   try {
-    if (existsSync(MONITORS_PATH)) {
-      const raw = readFileSync(MONITORS_PATH, "utf-8");
+    const path = monitorsPath();
+    if (existsSync(path)) {
+      const raw = readFileSync(path, "utf-8");
       return JSON.parse(raw);
     }
   } catch {
@@ -78,9 +83,10 @@ function loadMonitors(): MonitorState[] {
 }
 
 function saveMonitors(monitors: MonitorState[]): void {
-  const dir = join(homedir(), ".config", "persoje");
+  const path = monitorsPath();
+  const dir = dirname(path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(MONITORS_PATH, JSON.stringify(monitors, null, 2), "utf-8");
+  writeFileSync(path, JSON.stringify(monitors, null, 2), "utf-8");
 }
 
 export class MonitorManager {

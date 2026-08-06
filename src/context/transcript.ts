@@ -3,10 +3,14 @@ import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import type { ChatMessage } from "../models/openrouter.ts";
 
-export const TRANSCRIPT_DIR = join(homedir(), ".config", "persoje", "transcripts");
+// PERSOJE_CONFIG_DIR overrides the base dir — see mcp/client.ts's mcpConfigPath
+// for why this is a function, not a module-load-time const (vault task #13).
+export function transcriptDir(): string {
+  return join(process.env.PERSOJE_CONFIG_DIR || join(homedir(), ".config", "persoje"), "transcripts");
+}
 
 export function transcriptPathFor(sessionId: string): string {
-  return join(TRANSCRIPT_DIR, `${sessionId}.md`);
+  return join(transcriptDir(), `${sessionId}.md`);
 }
 
 /**

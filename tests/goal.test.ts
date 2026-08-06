@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionStore } from "../src/session/store.ts";
@@ -57,15 +57,27 @@ test("transcript tool reports empty / unavailable cleanly", async () => {
 });
 
 test("TranscriptWriter mirrors messages to markdown", async () => {
-  const { TranscriptWriter } = await import("../src/context/transcript.ts");
-  // point HOME-derived path is global; instead test the writer's file directly
-  const w = new TranscriptWriter("test-" + Math.random().toString(36).slice(2));
-  w.append({ role: "user", content: "do the thing" });
-  w.append({ role: "assistant", content: "ok", tool_calls: [{ id: "c1", type: "function", function: { name: "read", arguments: '{"path":"a"}' } }] });
-  w.append({ role: "tool", content: "file contents", tool_call_id: "c1" });
-  const md = readFileSync(w.filePath, "utf-8");
-  expect(md).toContain("## user");
-  expect(md).toContain("do the thing");
-  expect(md).toContain("→ read(");
-  expect(md).toContain("file contents");
+  // Isolated from the user's real ~/.config/persoje/transcripts/ — transcriptDir()
+  // reads PERSOJE_CONFIG_DIR lazily (at call time), so setting it right before
+  // construction is enough (vault task #13; the old version wrote real, if
+  // randomly-named, litter files into the user's real transcripts dir forever).
+  const dir = mkdtempSync(join(tmpdir(), "persoje-test-transcript-"));
+  const prev = process.env.PERSOJE_CONFIG_DIR;
+  process.env.PERSOJE_CONFIG_DIR = dir;
+  try {
+    const { TranscriptWriter } = await import("../src/context/transcript.ts");
+    const w = new TranscriptWriter("test-" + Math.random().toString(36).slice(2));
+    w.append({ role: "user", content: "do the thing" });
+    w.append({ role: "assistant", content: "ok", tool_calls: [{ id: "c1", type: "function", function: { name: "read", arguments: '{"path":"a"}' } }] });
+    w.append({ role: "tool", content: "file contents", tool_call_id: "c1" });
+    const md = readFileSync(w.filePath, "utf-8");
+    expect(md).toContain("## user");
+    expect(md).toContain("do the thing");
+    expect(md).toContain("→ read(");
+    expect(md).toContain("file contents");
+  } finally {
+    if (prev === undefined) delete process.env.PERSOJE_CONFIG_DIR;
+    else process.env.PERSOJE_CONFIG_DIR = prev;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
