@@ -96,7 +96,7 @@ export async function buildRepoMap(cwd: string, maxTokens: number): Promise<stri
   const lines: string[] = ["Project map (top symbols by reference count):"];
   let used = estimateTokens(lines[0]!);
   for (const file of parsed) {
-    const line = `${file.path}: ${file.symbols.slice(0, 8).join(", ")}`;
+    const line = `${file.path}: ${file.symbols.slice(0, 5).join(", ")}`;
     const cost = estimateTokens(line);
     if (used + cost > maxTokens) break;
     lines.push(line);
