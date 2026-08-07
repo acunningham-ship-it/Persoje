@@ -228,6 +228,16 @@ bunx tsc --noEmit
 bun run start       # run from source
 ```
 
+## Who builds this
+
+Persoje is built and maintained by **[HamTek](https://hamtek.dev)**.
+
+We built it because we run agents all day and wanted a coding CLI we could point at any
+model, audit after the fact, and change when it got something wrong. It's our daily driver.
+
+Making agents hold up outside the demo is the work we do. If that's your problem too,
+we're at [hamtek.dev](https://hamtek.dev).
+
 ## License
 
 MIT.
